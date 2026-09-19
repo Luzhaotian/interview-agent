@@ -1,0 +1,227 @@
+[
+  {
+    "id": "ag-001",
+    "category": "agent",
+    "topic": "Agent 基础",
+    "tags": ["agent", "llm", "工具"],
+    "difficulty": "easy",
+    "question": "你怎么区分一次普通的模型调用和一个 Agent？",
+    "answer_outline": "普通调用是一次输入对应一次输出。Agent 会根据目标决定下一步，可能多次调用工具、观察结果再继续，直到停止条件满足。"
+  },
+  {
+    "id": "ag-002",
+    "category": "agent",
+    "topic": "Agent 基础",
+    "tags": ["agent", "工作流", "langgraph"],
+    "difficulty": "medium",
+    "question": "固定工作流和让模型自己决定下一步，各自适合什么任务？",
+    "answer_outline": "步骤清楚、要可复现时用固定图，比如先解析简历再检索再选题。开放任务才把路由交给模型。能写成图的流程不要伪装成自由 Agent。"
+  },
+  {
+    "id": "ag-003",
+    "category": "agent",
+    "topic": "工具调用",
+    "tags": ["agent", "tool calling", "函数"],
+    "difficulty": "medium",
+    "question": "给模型一个工具时，描述里至少要写清什么，它才不容易调错？",
+    "answer_outline": "要写清工具做什么、什么时候不该用、每个参数的含义和单位。参数用结构化约束。描述含糊时，模型会填错字段或在不该调用时调用。"
+  },
+  {
+    "id": "ag-004",
+    "category": "agent",
+    "topic": "工具调用",
+    "tags": ["agent", "tool calling", "权限"],
+    "difficulty": "hard",
+    "question": "工具能改数据或发外部请求时，你怎么限制模型的权限？",
+    "answer_outline": "按任务给最小权限，危险操作要人确认。参数在执行前校验，不把模型输出直接当命令。失败要返回可理解的错误，而不是把堆栈塞回上下文。"
+  },
+  {
+    "id": "ag-005",
+    "category": "agent",
+    "topic": "RAG",
+    "tags": ["rag", "检索", "知识库"],
+    "difficulty": "medium",
+    "question": "RAG 解决的是模型的哪类问题？它不能解决什么？",
+    "answer_outline": "它让回答基于检索到的资料，减轻记不住私有或新知识的问题。它不保证检索对，也不让模型自动学会推理。资料过期、切块不好，回答一样会错。"
+  },
+  {
+    "id": "ag-006",
+    "category": "agent",
+    "topic": "RAG",
+    "tags": ["rag", "切块", "chunk"],
+    "difficulty": "medium",
+    "question": "切块太大或太小，分别会让检索出什么问题？",
+    "answer_outline": "太大则一块里主题混杂，相关句子被无关内容稀释。太小则缺上下文，模型看到碎片。应按标题或语义边界切，并保留重叠和来源信息。"
+  },
+  {
+    "id": "ag-007",
+    "category": "agent",
+    "topic": "RAG",
+    "tags": ["rag", "embedding", "关键词"],
+    "difficulty": "medium",
+    "question": "向量检索和关键词检索各擅长什么？什么时候要一起用？",
+    "answer_outline": "关键词擅长专有名词、编号和精确短语。向量擅长同义改写。面试题、代码符号这类要精确命中的内容，关键词或混合检索往往比纯向量稳。"
+  },
+  {
+    "id": "ag-008",
+    "category": "agent",
+    "topic": "RAG",
+    "tags": ["rag", "重排", "rerank"],
+    "difficulty": "hard",
+    "question": "已经取出了 top-k，为什么有时还要再重排？",
+    "answer_outline": "第一阶段追求召回，排序不一定准。重排模型看问题和段落的细粒度关系，把真正能回答问题的段落提前。代价是延迟，所以只对几十条候选做。"
+  },
+  {
+    "id": "ag-009",
+    "category": "agent",
+    "topic": "幻觉",
+    "tags": ["幻觉", "rag", "引用"],
+    "difficulty": "medium",
+    "question": "怎么让回答尽量不脱离检索到的材料？",
+    "answer_outline": "提示里要求只使用给定材料，并返回材料编号。材料不够时明确说不知道。程序侧再校验引用是否真的存在，而不是相信模型自己说引用了。"
+  },
+  {
+    "id": "ag-010",
+    "category": "agent",
+    "topic": "幻觉",
+    "tags": ["幻觉", "评测"],
+    "difficulty": "hard",
+    "question": "你怎么判断一次 RAG 回答是检索错了，还是模型没用上检索结果？",
+    "answer_outline": "先看正确段落有没有进候选。进了但回答仍错，是生成或提示问题。没进候选，是切块、查询或索引问题。把两段分开测，才知道该改检索还是改提示。"
+  },
+  {
+    "id": "ag-011",
+    "category": "agent",
+    "topic": "记忆",
+    "tags": ["agent", "记忆", "上下文"],
+    "difficulty": "medium",
+    "question": "对话窗口、摘要记忆和外部档案，分别该记什么？",
+    "answer_outline": "窗口放当前任务的原文。摘要放已经确认的决定，避免无限变长。用户偏好和长期事实放外部存储，并允许更正。不要把每一轮都原样累积进提示。"
+  },
+  {
+    "id": "ag-012",
+    "category": "agent",
+    "topic": "LangGraph",
+    "tags": ["langgraph", "状态"],
+    "difficulty": "medium",
+    "question": "LangGraph 里的状态和图里的节点是什么关系？",
+    "answer_outline": "状态是在节点之间传递的共享数据。每个节点读当前状态，返回要更新的部分。边决定下一个节点。这样步骤、输入输出和失败点都看得见。"
+  },
+  {
+    "id": "ag-013",
+    "category": "agent",
+    "topic": "LangGraph",
+    "tags": ["langgraph", "节点", "边"],
+    "difficulty": "easy",
+    "question": "为什么要把简历解析、检索、选题拆成不同节点，而不是一个大函数？",
+    "answer_outline": "拆开后每步的输入输出可以单独测，失败时知道停在哪。以后替换检索或模型，也不用改整条流程。一个大函数把这些边界藏起来了。"
+  },
+  {
+    "id": "ag-014",
+    "category": "agent",
+    "topic": "LangGraph",
+    "tags": ["langgraph", "条件边"],
+    "difficulty": "medium",
+    "question": "什么情况下用条件边，而不是固定走到下一个节点？",
+    "answer_outline": "下一步取决于上一步结果时用条件边。比如简历是空的就结束，检索不到题就改查询，置信度低就转人工。固定边适合顺序已经确定的流水线。"
+  },
+  {
+    "id": "ag-015",
+    "category": "agent",
+    "topic": "LangGraph",
+    "tags": ["langgraph", "人工确认"],
+    "difficulty": "medium",
+    "question": "哪类步骤应该停下来等人确认，而不是让图一直跑完？",
+    "answer_outline": "发消息、改数据、花钱或不可逆的动作应暂停。等人给出同意或修改后，图从断点继续。只读的检索和草稿可以自动做完。"
+  },
+  {
+    "id": "ag-016",
+    "category": "agent",
+    "topic": "LangGraph",
+    "tags": ["langgraph", "checkpoint", "持久化"],
+    "difficulty": "hard",
+    "question": "图执行到一半进程挂了，检查点能帮你恢复什么？",
+    "answer_outline": "检查点保存某一时刻的状态。重启后可以从上次成功的节点继续，而不是从头调用模型。设计上每步更新要能重放，外部副作用不能在未确认时做两次。"
+  },
+  {
+    "id": "ag-017",
+    "category": "agent",
+    "topic": "多 Agent",
+    "tags": ["agent", "多agent"],
+    "difficulty": "hard",
+    "question": "把一个任务拆给多个 Agent 时，你担心的主要问题是什么？",
+    "answer_outline": "职责重叠会来回踢皮球，上下文在传递中变样，成本和延迟上升。先定义谁做决定、谁只提供材料。多数业务用一条清楚的图就够，不必默认上多 Agent。"
+  },
+  {
+    "id": "ag-018",
+    "category": "agent",
+    "topic": "评测",
+    "tags": ["评测", "rag", "agent"],
+    "difficulty": "medium",
+    "question": "上线一个选题 Agent 之前，你会准备什么样的评测集？",
+    "answer_outline": "用真实简历和期望题目做一组样例，看是否来自题库、是否贴合技能、数量是否在范围内。改提示或检索后重跑同一批，避免只看一次演示。"
+  },
+  {
+    "id": "ag-019",
+    "category": "agent",
+    "topic": "安全",
+    "tags": ["agent", "提示注入", "安全"],
+    "difficulty": "hard",
+    "question": "简历或知识库文档里写着“忽略之前的指令”，系统会怎样中招？",
+    "answer_outline": "这是提示注入。模型可能把资料里的命令当成用户指令。应把资料标成不可信内容，工具权限与文本分开，不让文档内容决定能否调用危险工具。"
+  },
+  {
+    "id": "ag-020",
+    "category": "agent",
+    "topic": "成本",
+    "tags": ["agent", "延迟", "成本"],
+    "difficulty": "medium",
+    "question": "Agent 变慢、变贵时，你先砍哪一段？",
+    "answer_outline": "先看调用次数、每次上下文长度和检索量。能用规则判断的不要问模型。候选先裁剪再送给模型。缓存相同简历的画像。最后才考虑换更大的模型。"
+  },
+  {
+    "id": "ag-021",
+    "category": "agent",
+    "topic": "可靠性",
+    "tags": ["agent", "重试", "超时"],
+    "difficulty": "medium",
+    "question": "模型或工具超时了，无脑重试会带来什么问题？",
+    "answer_outline": "写操作重试可能执行两次。应区分可重试的读取和必须幂等的写入。加上次数上限、退避和超时，并把最后一次错误返回给调用方，而不是无限循环。"
+  },
+  {
+    "id": "ag-022",
+    "category": "agent",
+    "topic": "结构化输出",
+    "tags": ["agent", "json", "结构化"],
+    "difficulty": "easy",
+    "question": "为什么让模型直接说一段话，往往接不到后面的程序？",
+    "answer_outline": "程序需要稳定字段。应要求 JSON 或结构化对象，并在代码里校验类型和取值范围。解析失败要有兜底，不能把半截文本当成成功结果。"
+  },
+  {
+    "id": "ag-023",
+    "category": "agent",
+    "topic": "规划",
+    "tags": ["agent", "规划", "plan"],
+    "difficulty": "medium",
+    "question": "先让模型写出计划再执行，适合什么任务？不适合什么任务？",
+    "answer_outline": "步骤多、中途要检查的任务适合先计划。一步就能完成的分类或抽取，多一轮计划只增加成本和跑偏机会。计划也应能在工具结果出来后修改。"
+  },
+  {
+    "id": "ag-024",
+    "category": "agent",
+    "topic": "反思",
+    "tags": ["agent", "反思", "评测"],
+    "difficulty": "hard",
+    "question": "让模型自己检查上一轮回答，就一定能发现错误吗？",
+    "answer_outline": "不一定。它可能重复同一个错误，或为了挑错而改对的地方。反思要有外部依据，比如检索片段、测试结果或规则校验，而不是再问一次同一个模型。"
+  },
+  {
+    "id": "ag-025",
+    "category": "agent",
+    "topic": "Agent 基础",
+    "tags": ["agent", "边界"],
+    "difficulty": "easy",
+    "question": "哪些需求你不会做成 Agent？",
+    "answer_outline": "输入输出固定、规则清楚、要求强一致的流程，用普通函数或工作流更合适。Agent 适合信息不完整、需要检索或调用工具才能继续的任务。"
+  }
+]

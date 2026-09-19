@@ -1,0 +1,740 @@
+[
+  {
+    "id": "fe-html-001",
+    "category": "frontend",
+    "topic": "HTML",
+    "tags": ["html", "doctype"],
+    "difficulty": "easy",
+    "question": "页面开头的 DOCTYPE 是做什么的？不写会怎样？",
+    "answer_outline": "它声明文档类型，让浏览器用标准模式解析。省略后可能进入怪异模式，盒模型和部分 CSS 表现会和标准不一致。"
+  },
+  {
+    "id": "fe-html-002",
+    "category": "frontend",
+    "topic": "HTML",
+    "tags": ["html", "语义化", "a11y", "seo"],
+    "difficulty": "easy",
+    "question": "为什么提倡用 header、main、nav 这类语义化标签，而不是全用 div？",
+    "answer_outline": "语义化让结构可被人和辅助技术理解，有利于 SEO、读屏和默认样式。div 没有含义，只适合纯布局容器。"
+  },
+  {
+    "id": "fe-html-003",
+    "category": "frontend",
+    "topic": "HTML",
+    "tags": ["html", "script", "defer", "async"],
+    "difficulty": "medium",
+    "question": "script 的 defer 和 async 有什么区别？普通 script 标签又会怎样阻塞？",
+    "answer_outline": "普通脚本下载并立即执行，会阻塞解析。async 下载完就执行，顺序不保证。defer 等文档解析完后按出现顺序执行，更适合依赖 DOM 的脚本。"
+  },
+  {
+    "id": "fe-html-004",
+    "category": "frontend",
+    "topic": "HTML",
+    "tags": ["html", "viewport", "移动端"],
+    "difficulty": "easy",
+    "question": "移动端页面为什么要设置 viewport？width=device-width 解决什么问题？",
+    "answer_outline": "没有 viewport 时，移动浏览器常按约 980px 的布局视口缩放页面。width=device-width 让布局宽度等于设备宽度，配合 rem 或媒体查询才能做响应式。"
+  },
+  {
+    "id": "fe-html-005",
+    "category": "frontend",
+    "topic": "HTML",
+    "tags": ["html", "图片", "srcset", "性能"],
+    "difficulty": "medium",
+    "question": "img 的 srcset 和 picture 分别适合什么场景？",
+    "answer_outline": "srcset 按分辨率或视口宽度选择同一张图的不同尺寸。picture 可以换资源类型或艺术方向，比如移动端裁成竖图、桌面用横图，或优先 webp。"
+  },
+  {
+    "id": "fe-html-006",
+    "category": "frontend",
+    "topic": "HTML",
+    "tags": ["html", "a11y", "表单"],
+    "difficulty": "medium",
+    "question": "做一个可访问的表单，label、按钮和错误提示至少要注意什么？",
+    "answer_outline": "控件要用 label 关联，不能只靠 placeholder。按钮要有明确文本。错误要和字段关联，并让读屏能感知，不能只靠颜色区分。"
+  },
+  {
+    "id": "fe-html-007",
+    "category": "frontend",
+    "topic": "HTML",
+    "tags": ["html", "iframe", "安全"],
+    "difficulty": "hard",
+    "question": "嵌入第三方页面时，iframe 的 sandbox 能限制什么？",
+    "answer_outline": "sandbox 默认禁掉脚本、表单、弹窗和同源能力。需要脚本时再显式放开 allow-scripts。它用来降低第三方页面拿 cookie 或操作父页面的风险。"
+  },
+  {
+    "id": "fe-html-008",
+    "category": "frontend",
+    "topic": "HTML",
+    "tags": ["html", "表单", "校验"],
+    "difficulty": "easy",
+    "question": "HTML 自带的表单校验能做哪些事？什么时候还是要自己写？",
+    "answer_outline": "required、type、pattern、min、max 可以做基础校验，并阻止提交。复杂联动、异步唯一性校验和统一错误样式仍要自己写，并注意服务端必须再验一次。"
+  },
+  {
+    "id": "fe-css-001",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "盒模型", "box-sizing"],
+    "difficulty": "easy",
+    "question": "标准盒模型和 border-box 的宽高分别包含什么？",
+    "answer_outline": "content-box 的 width 只含内容。border-box 的 width 含内容、padding 和 border。组件库普遍用 border-box，避免加 padding 把布局撑破。"
+  },
+  {
+    "id": "fe-css-002",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "bfc", "浮动"],
+    "difficulty": "medium",
+    "question": "什么是 BFC？它能解决哪两类布局问题？",
+    "answer_outline": "BFC 是独立的块级格式化上下文。触发后内部浮动会被包含，相邻外边距也不会和外部折叠。常见触发方式有 overflow 非 visible、flex/grid 子项、float。"
+  },
+  {
+    "id": "fe-css-003",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "flex"],
+    "difficulty": "medium",
+    "question": "flex: 1 实际展开成哪三个属性？主轴空间不够时会怎样？",
+    "answer_outline": "常见展开是 flex-grow: 1、flex-shrink: 1、flex-basis: 0%。空间不够时按 shrink 和基准尺寸压缩。basis 用 auto 时会先参考内容宽度，表现和 0% 不同。"
+  },
+  {
+    "id": "fe-css-004",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "grid"],
+    "difficulty": "medium",
+    "question": "二维布局为什么更适合 Grid，而不是套很多层 Flex？",
+    "answer_outline": "Flex 是一维的，行和列要分别控制。Grid 能同时定义行轨和列轨，适合仪表盘、卡片墙。Flex 更适合导航、工具栏这类单方向分布。"
+  },
+  {
+    "id": "fe-css-005",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "position"],
+    "difficulty": "easy",
+    "question": "relative、absolute、fixed、sticky 的参照物分别是什么？",
+    "answer_outline": "relative 相对自身偏移并占位。absolute 相对最近的非 static 祖先。fixed 相对视口，但遇到 transform 等属性会改参照。sticky 在滚动容器内相对阈值粘住。"
+  },
+  {
+    "id": "fe-css-006",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "层叠", "z-index"],
+    "difficulty": "hard",
+    "question": "为什么子元素 z-index 很大，仍然盖不住另一个模块？",
+    "answer_outline": "z-index 只在同一个层叠上下文里比较。opacity、transform、filter 或定位加 z-index 都会新建上下文。比较的是两个上下文的层级，不是子元素自己的数值。"
+  },
+  {
+    "id": "fe-css-007",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "优先级", "选择器"],
+    "difficulty": "medium",
+    "question": "选择器优先级怎么比？!important 和内联样式插在什么位置？",
+    "answer_outline": "比较顺序大致是 !important、内联、id、类/属性/伪类、元素/伪元素，同级再比出现顺序。不要靠堆选择器，优先用类名和设计令牌控制覆盖。"
+  },
+  {
+    "id": "fe-css-008",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "重排", "重绘", "性能"],
+    "difficulty": "medium",
+    "question": "改哪些样式会触发布局，哪些通常只触发绘制？",
+    "answer_outline": "改 width、height、margin、字体等几何属性会重排。改 color、background 多半只重绘。transform 和 opacity 往往能走合成层，动画优先用它们。"
+  },
+  {
+    "id": "fe-css-009",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "响应式", "媒体查询"],
+    "difficulty": "easy",
+    "question": "做响应式时，移动优先和桌面优先的媒体查询写法有什么差别？",
+    "answer_outline": "移动优先先写窄屏样式，再用 min-width 往上增强。桌面优先用 max-width 往下覆盖。移动优先更符合现在的流量，也减少大屏样式被误伤。"
+  },
+  {
+    "id": "fe-css-010",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "变量", "继承"],
+    "difficulty": "medium",
+    "question": "CSS 自定义属性为什么适合做主题？它和 Sass 变量有什么本质区别？",
+    "answer_outline": "自定义属性在运行时存在，能继承、能被 JS 改、能做深浅色切换。Sass 变量在编译期就替换掉了，浏览器里看不到。"
+  },
+  {
+    "id": "fe-js-001",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "闭包"],
+    "difficulty": "medium",
+    "question": "什么是闭包？循环里用 var 绑定点击事件，为什么总拿到最后一个值？",
+    "answer_outline": "闭包是函数记住了定义时的词法环境。var 没有块级作用域，回调共享同一个 i。改成 let，或用函数参数把当前值拷进去，每次就会记住自己的值。"
+  },
+  {
+    "id": "fe-js-002",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "this"],
+    "difficulty": "medium",
+    "question": "普通函数、箭头函数和作为对象方法调用时，this 分别指向谁？",
+    "answer_outline": "普通函数看调用者，独立调用在严格模式指向 undefined。箭头函数没有自己的 this，沿词法作用域找。obj.fn() 里 this 是 obj。定时器和事件回调经常丢 this，要用箭头函数或 bind。"
+  },
+  {
+    "id": "fe-js-003",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "原型", "继承"],
+    "difficulty": "medium",
+    "question": "属性查找沿原型链怎么走？class extends 背后大致做了什么？",
+    "answer_outline": "先查对象自身，再查原型，直到 null。class 本质仍是原型。extends 会把子类原型接到父类原型，super 调用父类构造并正确设置 this。"
+  },
+  {
+    "id": "fe-js-004",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "事件循环", "宏任务", "微任务"],
+    "difficulty": "hard",
+    "question": "请按顺序说明一段同时包含 setTimeout、Promise.then 和同步代码的执行顺序。",
+    "answer_outline": "同步代码先跑完。本轮微任务队列清空后，才取一个宏任务。Promise.then 是微任务，setTimeout 是宏任务，所以 then 会早于 timeout 回调。"
+  },
+  {
+    "id": "fe-js-005",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "promise"],
+    "difficulty": "medium",
+    "question": "Promise 的三种状态能否回退？all、allSettled、race 的差别是什么？",
+    "answer_outline": "pending 只能变成 fulfilled 或 rejected，不能再变。all 有一个失败就失败。allSettled 等全部结束并给出各自结果。race 采用最先落定的那个结果。"
+  },
+  {
+    "id": "fe-js-006",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "async", "await"],
+    "difficulty": "medium",
+    "question": "async 函数返回值一定是 Promise 吗？await 后面抛错应该怎么接？",
+    "answer_outline": "async 函数总是返回 Promise，普通返回值会被包起来。await 的拒绝要用 try/catch，或者在调用处 catch。并行请求不要在循环里逐个 await，应先创建 Promise 再用 all。"
+  },
+  {
+    "id": "fe-js-007",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "防抖", "节流"],
+    "difficulty": "medium",
+    "question": "搜索框和滚动监听，分别该用防抖还是节流？为什么？",
+    "answer_outline": "搜索框用防抖，等用户停手再请求。滚动、拖拽用节流，按固定间隔采样，避免完全不触发。两者都要处理组件卸载后的定时器。"
+  },
+  {
+    "id": "fe-js-008",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "深拷贝"],
+    "difficulty": "medium",
+    "question": "structuredClone、JSON 往返和手写递归，做深拷贝时各有什么坑？",
+    "answer_outline": "JSON 会丢掉 undefined、函数、Date 和循环引用。手写要处理循环引用和特殊类型。structuredClone 能处理多数内置对象和循环引用，但仍不能克隆函数和 DOM 节点。"
+  },
+  {
+    "id": "fe-js-009",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "类型转换"],
+    "difficulty": "easy",
+    "question": "为什么业务代码里应避免用 ==？举一个容易踩的转换。",
+    "answer_outline": "== 会做类型转换。例如 [] == false 为 true，因为两边都被转成数字 0。比较用户输入和状态时用 ===，需要转换时显式 Number 或 Boolean。"
+  },
+  {
+    "id": "fe-js-010",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "作用域", "let", "const"],
+    "difficulty": "easy",
+    "question": "var、let、const 在作用域、提升和重复声明上有什么不同？",
+    "answer_outline": "var 是函数作用域，会提升并初始化为 undefined，能重复声明。let 和 const 是块级作用域，存在暂时性死区，不能重复声明。const 绑定不能重新赋值，但对象内容仍可改。"
+  },
+  {
+    "id": "fe-js-011",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "事件委托", "dom"],
+    "difficulty": "easy",
+    "question": "长列表的点击为什么常绑在父节点上？事件委托依赖什么机制？",
+    "answer_outline": "依赖冒泡。父节点统一监听，用 event.target 判断点的是哪一项。这样新增节点不用重新绑定，监听器数量也更少。不冒泡的事件不能这么做。"
+  },
+  {
+    "id": "fe-js-012",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "垃圾回收", "内存"],
+    "difficulty": "hard",
+    "question": "浏览器怎么判断一块内存可以回收？前端常见泄漏有哪些？",
+    "answer_outline": "主流实现从根对象出发做可达性分析，到不了的对象可回收。常见泄漏是未移除的定时器、事件监听、被闭包抓住的大对象，以及脱离文档仍被 JS 引用的 DOM。"
+  },
+  {
+    "id": "fe-js-013",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "模块", "esm"],
+    "difficulty": "medium",
+    "question": "ES Module 和 CommonJS 在加载时机、this 和循环依赖上有什么差别？",
+    "answer_outline": "ESM 是静态结构，导入提升，绑定是活的。CJS 运行时加载，导出的是值的拷贝。循环依赖时 ESM 可能读到未初始化绑定，CJS 可能拿到不完整的 exports。"
+  },
+  {
+    "id": "fe-js-014",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "map", "set"],
+    "difficulty": "easy",
+    "question": "对象当字典和 Map 有什么不同？什么时候用 Set？",
+    "answer_outline": "对象键会被转成字符串或 Symbol，还可能碰到原型上的键。Map 的键可以是任意值，有明确的 size。Set 用来去重和判断存在，比对象当集合更直接。"
+  },
+  {
+    "id": "fe-js-015",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "call", "apply", "bind"],
+    "difficulty": "medium",
+    "question": "call、apply、bind 都会改 this，它们的使用时机有什么不同？",
+    "answer_outline": "call 和 apply 立即调用，差别是参数逐个传还是数组传。bind 返回新函数，this 被固定，适合交给事件或定时器稍后调用。"
+  },
+  {
+    "id": "fe-js-016",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "异常", "promise"],
+    "difficulty": "medium",
+    "question": "同步 throw 和 Promise 拒绝，分别会被谁捕获？页面上怎么做兜底？",
+    "answer_outline": "try/catch 接得住同步异常和 await 的拒绝，接不住没有 await 的 Promise 拒绝。全局可用 error 和 unhandledrejection。上报时要带上堆栈和用户操作，避免只弹一个失败提示。"
+  },
+  {
+    "id": "fe-ts-001",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "interface", "type"],
+    "difficulty": "easy",
+    "question": "interface 和 type 都能描述对象，什么时候你会刻意选其中一个？",
+    "answer_outline": "对象形状、需要声明合并时用 interface。联合、交叉、映射和元组用 type 更自然。公开 API 的对象形状常用 interface，方便外部扩展。"
+  },
+  {
+    "id": "fe-ts-002",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "泛型"],
+    "difficulty": "medium",
+    "question": "写一个通用请求函数时，泛型解决什么问题？约束怎么加？",
+    "answer_outline": "泛型让返回值类型跟着调用方走，而不是退化成 any。可以用 extends 限制入参必须有 url 字段，或用默认类型参数给出兜底。"
+  },
+  {
+    "id": "fe-ts-003",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "unknown", "any"],
+    "difficulty": "medium",
+    "question": "接口返回先标成 unknown 而不是 any，后面使用时要做什么？",
+    "answer_outline": "unknown 不能直接当成员访问。要先用类型守卫、in 判断或 zod 这类运行时校验收窄。any 会关掉检查，错误会扩散到调用链。"
+  },
+  {
+    "id": "fe-ts-004",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "工具类型", "partial", "pick"],
+    "difficulty": "medium",
+    "question": "Partial、Pick、Omit 各自适合改哪种接口？",
+    "answer_outline": "Partial 把字段变成可选，适合更新入参。Pick 抽出需要的字段，适合列表项的瘦类型。Omit 去掉不该由调用方传的字段，比如服务端生成的 id。"
+  },
+  {
+    "id": "fe-ts-005",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "类型收窄", "联合类型"],
+    "difficulty": "medium",
+    "question": "可辨识联合类型如何用判别字段收窄？",
+    "answer_outline": "给每种形态一个共同的字面量字段，比如 kind。switch 这个字段后，每个分支里的其余字段会被收窄。新增一种形态时，穷尽检查能在编译期提醒漏分支。"
+  },
+  {
+    "id": "fe-ts-006",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "enum", "联合类型"],
+    "difficulty": "easy",
+    "question": "字符串联合类型相比数字枚举有什么好处？",
+    "answer_outline": "字符串联合不产生额外运行时代码，日志里的值也可读。数字枚举会反向映射，打包后更重，也容易和后端的字符串状态对不上。"
+  },
+  {
+    "id": "fe-browser-001",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "渲染", "回流"],
+    "difficulty": "hard",
+    "question": "从收到 HTML 到画出第一帧，浏览器大致经过哪些步骤？",
+    "answer_outline": "解析 HTML 建 DOM，解析 CSS 建 CSSOM，合成渲染树，再布局、绘制、分层合成。JS 可能阻塞解析。CSS 会阻塞渲染。关键 CSS 和异步脚本能提前第一帧。"
+  },
+  {
+    "id": "fe-browser-002",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "cors", "跨域"],
+    "difficulty": "medium",
+    "question": "简单请求和预检请求有什么不同？CORS 是浏览器限制还是服务端限制？",
+    "answer_outline": "CORS 由浏览器执行。简单请求直接发出，靠响应头决定脚本能否读结果。带自定义头或 PUT 等方法会先发 OPTIONS。服务端仍要自己鉴权，CORS 不是安全边界。"
+  },
+  {
+    "id": "fe-browser-003",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "cookie", "localstorage", "sessionstorage"],
+    "difficulty": "medium",
+    "question": "Cookie、localStorage、sessionStorage 在容量、生命周期和随请求发送上有何不同？",
+    "answer_outline": "Cookie 小，默认可随请求发送，能设 HttpOnly 和过期时间。localStorage 约数 MB，不随请求走，除非清掉否则一直在。sessionStorage 按标签页隔离，关页就没。"
+  },
+  {
+    "id": "fe-browser-004",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "同源", "安全"],
+    "difficulty": "medium",
+    "question": "同源策略看哪三个部分？哪些资源不受它按同样方式限制？",
+    "answer_outline": "协议、主机、端口都相同才同源。它限制脚本读另一个源的 DOM 和响应。图片、脚本、样式可以被跨源加载，但脚本默认读不到响应内容，除非对方允许 CORS。"
+  },
+  {
+    "id": "fe-browser-005",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "service worker", "缓存"],
+    "difficulty": "hard",
+    "question": "Service Worker 能拦截什么？用它做离线缓存时最容易犯什么错？",
+    "answer_outline": "它可以拦截该作用域下的网络请求，并决定走缓存还是网络。常见错误是缓存了带用户身份的接口，或更新后旧缓存不清，导致用户一直看到旧页面。"
+  },
+  {
+    "id": "fe-browser-006",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "关键渲染路径", "性能"],
+    "difficulty": "hard",
+    "question": "什么是关键渲染路径？首屏最该优先加载哪些资源？",
+    "answer_outline": "它是生成第一帧所依赖的 HTML、CSS 和同步 JS。应内联或优先关键 CSS，推迟非关键脚本，图片用合适尺寸。阻塞渲染的资源越少，首屏越早。"
+  },
+  {
+    "id": "fe-net-001",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["http", "缓存", "etag"],
+    "difficulty": "medium",
+    "question": "强缓存和协商缓存分别看哪些响应头？命中时状态码有什么不同？",
+    "answer_outline": "强缓存看 Cache-Control 和 Expires，命中时不发请求，常见是 200 from memory/disk cache。协商缓存看 ETag/If-None-Match 或 Last-Modified，未变化时返回 304。"
+  },
+  {
+    "id": "fe-net-002",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["https", "tls", "安全"],
+    "difficulty": "hard",
+    "question": "HTTPS 握手大致交换了什么？它防的是窃听还是业务鉴权？",
+    "answer_outline": "客户端验证证书，双方协商密钥，之后流量加密。它防窃听和篡改，不代替登录。用户身份仍要靠 Cookie、Token 或会话。"
+  },
+  {
+    "id": "fe-net-003",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["http2", "http", "多路复用"],
+    "difficulty": "medium",
+    "question": "HTTP/2 的多路复用解决了 HTTP/1.1 的什么问题？",
+    "answer_outline": "HTTP/1.1 一个连接上请求容易队头阻塞，所以浏览器会开多个连接。HTTP/2 在一个连接上交错多个流，减少连接数。它没有取消应用层的大包问题，HTTP/3 才改到基于 UDP 的 QUIC。"
+  },
+  {
+    "id": "fe-net-004",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["http", "get", "post"],
+    "difficulty": "easy",
+    "question": "GET 和 POST 的差别只是参数放哪吗？缓存和幂等上怎么看？",
+    "answer_outline": "GET 语义是读取，可缓存、应幂等，参数通常在 URL。POST 语义是提交，默认不缓存，重复提交可能产生多次副作用。安全上两者都要走 HTTPS，URL 更容易进日志。"
+  },
+  {
+    "id": "fe-net-005",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["http", "状态码"],
+    "difficulty": "easy",
+    "question": "401、403、404、409、429 在前端分别应该怎么处理？",
+    "answer_outline": "401 去登录或刷新凭证。403 是已登录但无权限，不要当成未登录。404 是资源不存在。409 是冲突，比如版本被别人改了。429 要退避重试，不能立刻死循环。"
+  },
+  {
+    "id": "fe-net-006",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["websocket", "http", "实时"],
+    "difficulty": "medium",
+    "question": "什么场景用 WebSocket，什么场景轮询或 SSE 就够了？",
+    "answer_outline": "服务端单向推进度可以用 SSE。双向、高频，比如协作光标，用 WebSocket。偶尔更新用短轮询更简单。选的时候要考虑重连、心跳和代理超时。"
+  },
+  {
+    "id": "fe-perf-001",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "web vitals", "lcp", "inp"],
+    "difficulty": "medium",
+    "question": "LCP、INP、CLS 分别在衡量什么？举一个你会先查的原因。",
+    "answer_outline": "LCP 看最大内容出现得晚不晚，常是大图或阻塞脚本。INP 看交互到下一帧的延迟，常是长任务。CLS 看布局跳动，常是没留尺寸的图片或晚插入的横幅。"
+  },
+  {
+    "id": "fe-perf-002",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "代码分割", "路由"],
+    "difficulty": "medium",
+    "question": "路由级代码分割为什么能减小首屏包？动态 import 要注意什么？",
+    "answer_outline": "首屏只下载当前路由的代码，其他路由等进入再拉。要注意加载态、失败重试，以及把公共依赖抽出去，避免每个路由都重复打包同一份库。"
+  },
+  {
+    "id": "fe-perf-003",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "虚拟列表", "长列表"],
+    "difficulty": "hard",
+    "question": "一万行表格为什么不能直接全渲染？虚拟列表要维护哪些状态？",
+    "answer_outline": "全渲染会产生大量 DOM，滚动和更新都很贵。虚拟列表只渲染可视区及少量缓冲，要维护滚动偏移、行高和起止索引。行高不固定时要用测量缓存。"
+  },
+  {
+    "id": "fe-perf-004",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "图片", "懒加载"],
+    "difficulty": "easy",
+    "question": "图片优化你会从哪几件事下手？",
+    "answer_outline": "选合适格式和尺寸，不要用原图硬缩。首屏外图片懒加载，并预留宽高避免跳动。能用 CDN 和缓存。图标优先用 SVG 或雪碧，避免一堆小请求。"
+  },
+  {
+    "id": "fe-perf-005",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "打包", "bundle"],
+    "difficulty": "medium",
+    "question": "包体积突然变大，你怎么定位是哪一个依赖引进来的？",
+    "answer_outline": "看打包分析图，对比上一个版本的模块体积。常见原因是整包引入了只需要一个函数的库，或把仅服务端用的包打进了客户端。再决定换库、按需引入或外置。"
+  },
+  {
+    "id": "fe-perf-006",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "内存泄漏", "spa"],
+    "difficulty": "hard",
+    "question": "单页应用切路由后内存一直涨，你会怎么查？",
+    "answer_outline": "用性能面板看堆快照，对比两次路由切换后仍被保留的对象。重点看全局订阅、定时器、未取消的请求和被缓存的大列表。修复后要在卸载时成对清理。"
+  },
+  {
+    "id": "fe-eng-001",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["vite", "webpack", "工程化"],
+    "difficulty": "medium",
+    "question": "Vite 开发时为什么通常比 Webpack 启动快？生产构建还一样吗？",
+    "answer_outline": "开发时 Vite 靠浏览器原生 ESM，按请求编译，不先打包整站。生产环境仍要打包优化，常用 Rollup。所以开发快不代表生产构建策略可以不管。"
+  },
+  {
+    "id": "fe-eng-002",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "tree-shaking", "打包"],
+    "difficulty": "medium",
+    "question": "Tree shaking 生效需要哪些前提？为什么有的库摇不掉？",
+    "answer_outline": "需要 ESM 的静态导入导出，打包器才能分析未使用导出。库如果是 CJS、有副作用，或 package.json 没标 sideEffects，就可能摇不掉。自己的模块也要避免顶层副作用。"
+  },
+  {
+    "id": "fe-eng-003",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "sourcemap", "调试"],
+    "difficulty": "easy",
+    "question": "线上要不要打开 source map？打开和不打开分别有什么代价？",
+    "answer_outline": "打开后能把压缩代码映射回源码，方便排错，但会暴露源码。可以只上传到错误监控平台，不公开挂到 CDN。完全关闭则线上堆栈很难读。"
+  },
+  {
+    "id": "fe-eng-004",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "monorepo", "依赖"],
+    "difficulty": "medium",
+    "question": "前端 monorepo 里，应用和组件包怎么共享依赖才不容易版本打架？",
+    "answer_outline": "用工作区把包连起来，公共依赖尽量提升到根。组件包声明 peerDependency，避免打进第二份 React。发布前要约定版本和变更日志，不然应用会锁到旧包。"
+  },
+  {
+    "id": "fe-eng-005",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "环境变量", "构建"],
+    "difficulty": "easy",
+    "question": "前端环境变量为什么不能用来放真正的密钥？",
+    "answer_outline": "打进包里的变量用户都能看到。只适合放公开的接口地址和功能开关。密钥、数据库密码必须留在服务端，前端只拿短期凭证。"
+  },
+  {
+    "id": "fe-eng-006",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "监控", "错误上报"],
+    "difficulty": "medium",
+    "question": "前端错误监控至少要采集哪些信息，才够你复现问题？",
+    "answer_outline": "要有错误消息、堆栈、页面地址、版本号、用户操作面包屑和接口状态。还要采样，避免把用户输入和 token 原样上报。发布后按版本对比错误率。"
+  },
+  {
+    "id": "fe-vue-001",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "响应式", "proxy"],
+    "difficulty": "medium",
+    "question": "Vue 3 的响应式和 Vue 2 的 Object.defineProperty 方案，在新增属性上有什么差别？",
+    "answer_outline": "Vue 2 不能自动监听后加的属性，常要用特定 API。Vue 3 用 Proxy 拦截读写和删除，新增属性也能追踪。仍要注意解构后失去响应，要用 toRefs 或在模板里通过对象访问。"
+  },
+  {
+    "id": "fe-vue-002",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "computed", "watch"],
+    "difficulty": "easy",
+    "question": "computed 和 watch 都能跟着数据变，选型时你怎么区分？",
+    "answer_outline": "computed 是派生值，有缓存，适合模板里要用的结果。watch 是副作用，适合发请求、写存储或在变化后做一段过程。不要在 computed 里发请求。"
+  },
+  {
+    "id": "fe-vue-003",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "生命周期"],
+    "difficulty": "easy",
+    "question": "请求数据更适合放在哪个生命周期？组件卸载时要清理什么？",
+    "answer_outline": "setup 或 onMounted 都可以发请求，依赖 DOM 尺寸时放 onMounted。卸载时取消请求、清定时器和事件，避免把结果写进已经不存在的组件。"
+  },
+  {
+    "id": "fe-vue-004",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "composable", "组合式"],
+    "difficulty": "medium",
+    "question": "组合式函数和 mixin 相比，解决了什么问题？",
+    "answer_outline": "mixin 的数据来源不透明，命名容易撞。组合式函数显式返回要用的状态和方法，来源看得清，也更好做类型。注意在函数里调用的生命周期仍要处在 setup 同步阶段。"
+  },
+  {
+    "id": "fe-vue-005",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "pinia", "状态"],
+    "difficulty": "medium",
+    "question": "页面本地状态和 Pinia 全局状态，你用什么标准来划分？",
+    "answer_outline": "只服务当前页的表单和弹窗留在组件。多个页面共享、刷新后要恢复，或和登录用户相关的数据放 store。不要把所有接口结果都塞进全局，否则难以知道谁在改它。"
+  },
+  {
+    "id": "fe-vue-006",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "nexttick", "dom"],
+    "difficulty": "medium",
+    "question": "改完数据立刻读 DOM 为什么常常是旧的？nextTick 在等什么？",
+    "answer_outline": "Vue 异步更新 DOM，同一轮里的多次修改会合并。nextTick 的回调排在 DOM 更新之后。如果只是派生展示，优先用计算属性，而不是改完再去量 DOM。"
+  },
+  {
+    "id": "fe-react-001",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "协调", "虚拟dom"],
+    "difficulty": "hard",
+    "question": "React 更新时为什么不直接操作真实 DOM？协调阶段大致在比较什么？",
+    "answer_outline": "先根据状态算出新的元素树，再和上次的树按层级比较，算出最少的 DOM 操作。同层用 type 和 key 判断是复用还是替换。这避免了每次都重绘整棵子树。"
+  },
+  {
+    "id": "fe-react-002",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "hooks"],
+    "difficulty": "medium",
+    "question": "为什么 Hooks 不能写在条件判断里？",
+    "answer_outline": "React 靠调用顺序把每次渲染的 Hook 对应起来。条件调用会让顺序变化，状态就会串到别的 Hook 上。要在组件顶层按固定顺序调用，条件逻辑放进 Hook 内部。"
+  },
+  {
+    "id": "fe-react-003",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "usememo", "usecallback"],
+    "difficulty": "medium",
+    "question": "useMemo 和 useCallback 不是越加越快。什么时候才值得加？",
+    "answer_outline": "值得加的情况是计算很贵，或要把稳定引用传给用了 memo 的子组件。普通对象和回调每次新建通常没问题。先用分析工具看到无效渲染，再加缓存。"
+  },
+  {
+    "id": "fe-react-004",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "状态", "批处理"],
+    "difficulty": "medium",
+    "question": "同一个事件里连续两次 setState，为什么不能靠读旧 state 累加？",
+    "answer_outline": "更新会被批处理，两次都读到同一个旧值就会丢一次。累加要用函数式更新，拿到最新的上一次状态。异步回调里现在同样会批处理，不要假设每次 set 都立刻渲染。"
+  },
+  {
+    "id": "fe-react-005",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "key", "列表"],
+    "difficulty": "easy",
+    "question": "列表的 key 为什么不要用数组下标？什么情况用下标也可以？",
+    "answer_outline": "插入、删除或排序后，下标会指向另一条数据，输入框状态会串。应使用稳定的业务 id。列表静态、不会重排时，下标才勉强可接受。"
+  },
+  {
+    "id": "fe-react-006",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "context", "状态"],
+    "difficulty": "medium",
+    "question": "Context 适合放什么？为什么高频变化的数据不适合直接放进去？",
+    "answer_outline": "适合主题、语言、当前用户这类低频率数据。Context 值一变，所有消费组件都会跟着渲染。高频数据应拆 Context、下沉状态，或改用专门的状态库。"
+  },
+  {
+    "id": "fe-sec-001",
+    "category": "frontend",
+    "topic": "安全",
+    "tags": ["安全", "xss", "javascript"],
+    "difficulty": "medium",
+    "question": "页面上把用户输入插进 HTML，怎样避免 XSS？",
+    "answer_outline": "默认做转义，不要把不可信字符串写进 innerHTML。富文本要用白名单清洗。Cookie 带登录态时应加 HttpOnly，减少脚本偷走会话的可能。"
+  },
+  {
+    "id": "fe-sec-002",
+    "category": "frontend",
+    "topic": "安全",
+    "tags": ["安全", "csrf", "cookie"],
+    "difficulty": "medium",
+    "question": "Cookie 登录为什么会有 CSRF？前端配合后端可以怎么防？",
+    "answer_outline": "浏览器会自动带上同站 Cookie，别的网站可以诱使用户发出请求。可用 SameSite、校验来源，或让前端在自定义头里带上服务端下发的 CSRF 令牌。纯 Token 放在内存、不自动随请求走时，风险更低。"
+  },
+  {
+    "id": "fe-browser-007",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "事件", "捕获", "冒泡"],
+    "difficulty": "easy",
+    "question": "DOM 事件的捕获和冒泡有什么差别？stopPropagation 拦得住什么？",
+    "answer_outline": "事件先从外向内捕获，再到目标，然后向外冒泡。监听默认在冒泡阶段。stopPropagation 阻止继续传播，但不阻止同一节点上的其他监听。不冒泡的事件，比如部分焦点事件，委托会失效。"
+  },
+  {
+    "id": "fe-perf-007",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "重排", "布局"],
+    "difficulty": "hard",
+    "question": "为什么在循环里交替读 offsetHeight 和改样式会特别卡？",
+    "answer_outline": "读布局信息会迫使浏览器把之前的样式修改先算完，造成多次强制同步布局。应先批量读，再批量写，或用 transform 避开布局。这比单次改样式贵得多。"
+  },
+  {
+    "id": "fe-eng-007",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "npm", "依赖"],
+    "difficulty": "easy",
+    "question": "dependencies 和 devDependencies 怎么分？锁文件为什么要提交？",
+    "answer_outline": "运行时需要的放 dependencies，只在构建和测试用的放 devDependencies。锁文件固定传递依赖版本，保证每个人和线上装到同一棵树。只提交 package.json 不能保证这一点。"
+  },
+  {
+    "id": "fe-vue-007",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "组件", "通信"],
+    "difficulty": "easy",
+    "question": "父子组件、兄弟组件和跨层级组件，分别用什么方式传数据？",
+    "answer_outline": "父传子用 props，子通知父用事件。兄弟可以提升状态到共同父级。跨很多层再用 provide/inject 或 store。能用 props 说清的数据，不要先放全局。"
+  }
+]
