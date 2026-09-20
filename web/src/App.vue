@@ -82,8 +82,11 @@ onUnmounted(() => {
   <div class="shell">
     <aside class="rail">
       <div class="brand-block">
-        <p class="brand">面试助手</p>
-        <p class="tagline">由浅入深</p>
+        <img class="logo" src="/logo.svg" alt="" width="32" height="32" />
+        <div>
+          <p class="brand">面试助手</p>
+          <p class="tagline">由浅入深</p>
+        </div>
       </div>
 
       <button type="button" class="new-chat" :disabled="chat.sending" @click="chat.createNewThread()">
@@ -211,6 +214,20 @@ onUnmounted(() => {
     #12202e;
   color: #f4faf8;
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex: none;
 }
 
 .brand {

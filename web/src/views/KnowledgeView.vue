@@ -20,6 +20,8 @@ const loading = ref(true)
 const errorText = ref('')
 const keyword = ref('')
 const category = ref('all')
+const difficulty = ref('')
+const activeTag = ref('')
 const openId = ref('')
 
 const categories = [
@@ -29,10 +31,18 @@ const categories = [
   { id: 'backend', name: '后端' },
 ]
 
+const difficulties = [
+  { id: 'easy', name: '简单' },
+  { id: 'medium', name: '中等' },
+  { id: 'hard', name: '困难' },
+]
+
 const filtered = computed(() => {
   const needle = keyword.value.trim().toLowerCase()
   return questions.value.filter((item) => {
     if (category.value !== 'all' && item.category !== category.value) return false
+    if (difficulty.value && item.difficulty !== difficulty.value) return false
+    if (activeTag.value && !item.tags.includes(activeTag.value)) return false
     if (!needle) return true
     const haystack = [item.question, item.topic, item.id, item.tags.join(' ')].join(' ').toLowerCase()
     return haystack.includes(needle)
@@ -69,6 +79,14 @@ function toggle(id: string) {
   openId.value = openId.value === id ? '' : id
 }
 
+function selectTag(name: string) {
+  activeTag.value = activeTag.value === name ? '' : name
+}
+
+function selectDifficulty(id: string) {
+  difficulty.value = difficulty.value === id ? '' : id
+}
+
 onMounted(load)
 </script>
 
@@ -99,7 +117,21 @@ onMounted(load)
           {{ item.name }}
         </button>
       </div>
+      <div class="filters">
+        <button
+          v-for="item in difficulties"
+          :key="item.id"
+          type="button"
+          :data-on="difficulty === item.id"
+          @click="selectDifficulty(item.id)"
+        >
+          {{ item.name }}
+        </button>
+      </div>
       <input v-model="keyword" type="search" placeholder="搜题目、主题或标签" />
+      <div v-if="activeTag" class="active-tag">
+        <button type="button" @click="activeTag = ''">{{ activeTag }} ×</button>
+      </div>
     </div>
 
     <p v-if="loading">正在读取题目…</p>
@@ -113,9 +145,21 @@ onMounted(load)
           >
           <span class="title">{{ item.question }}</span>
         </button>
+        <div v-if="item.tags.length" class="tag-row">
+          <button
+            v-for="name in item.tags"
+            :key="name"
+            type="button"
+            class="tag"
+            :data-on="activeTag === name"
+            @click="selectTag(name)"
+          >
+            {{ name }}
+          </button>
+        </div>
         <div v-if="openId === item.id" class="detail">
           <p><em>参考答案</em>{{ item.answer_outline }}</p>
-          <p class="tags">{{ item.id }} · {{ item.tags.join('、') || '无标签' }}</p>
+          <p class="qid">{{ item.id }}</p>
         </div>
       </li>
     </ul>
@@ -163,13 +207,15 @@ header p {
 
 .toolbar {
   display: flex;
-  gap: 12px;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin: 20px 0;
 }
 
 .filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -181,6 +227,11 @@ input {
   padding: 8px 12px;
 }
 
+.filters button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .filters button[data-on='true'] {
   background: var(--accent);
   border-color: var(--accent);
@@ -188,7 +239,7 @@ input {
 }
 
 input {
-  width: min(320px, 100%);
+  width: 100%;
 }
 
 .error {
@@ -214,7 +265,7 @@ li {
   display: grid;
   gap: 4px;
   width: 100%;
-  padding: 14px 16px;
+  padding: 14px 16px 8px;
   border: 0;
   background: transparent;
   text-align: left;
@@ -250,7 +301,39 @@ li {
   font-weight: 700;
 }
 
-.tags {
+.tag-row,
+.active-tag {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-row {
+  padding: 0 16px 12px;
+}
+
+.tag,
+.active-tag button {
+  flex: none;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-strong);
+  padding: 2px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tag[data-on='true'],
+.active-tag button {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.qid {
   margin-top: 8px !important;
   color: var(--muted);
   font-size: 13px;
@@ -260,11 +343,6 @@ li {
   .page {
     height: auto;
     padding: 16px;
-  }
-
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
   }
 }
 </style>
