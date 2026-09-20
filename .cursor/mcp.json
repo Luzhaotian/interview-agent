@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "interview-web": {
-      "command": "bash",
-      "args": ["backend/run_mcp.sh"]
-    }
-  }
-}

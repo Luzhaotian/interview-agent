@@ -137,6 +137,38 @@ def retrieve(profile: dict, questions: list[dict], limit: int = 40) -> list[dict
     return selected[:limit]
 
 
+def find_skill_gaps(profile: dict, questions: list[dict], max_gaps: int = 3) -> list[str]:
+    """找出简历技能在知识库里几乎没有对应题的缺口主题。"""
+    gaps: list[str] = []
+    seen: set[str] = set()
+    for skill in profile.get("skills") or []:
+        text = str(skill).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if _skill_covered(text, questions):
+            continue
+        gaps.append(text)
+        if len(gaps) >= max_gaps:
+            break
+    return gaps
+
+
+def _skill_covered(skill: str, questions: list[dict]) -> bool:
+    tokens = _skill_tokens([skill])
+    if any(_skill_overlap(item, tokens) > 0 for item in questions):
+        return True
+    needle = skill.lower()
+    for item in questions:
+        blob = _index_text(item).lower()
+        if needle and needle in blob:
+            return True
+    return False
+
+
 def _read_file(path: Path, default_category: str | None) -> list[dict]:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() == ".json":

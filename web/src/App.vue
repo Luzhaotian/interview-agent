@@ -1,292 +1,582 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
-type KbStats = {
-  total: number
-  counts: Record<string, number>
-}
+import { label } from '@/lib/labels'
+import KnowledgeView from '@/views/KnowledgeView.vue'
+import McpView from '@/views/McpView.vue'
+import ChatView from '@/views/ChatView.vue'
+import { useChatStore } from '@/stores/chat'
+import { useSessionStore } from '@/stores/session'
 
-type Profile = {
-  years: string
-  focus: string
-  skills: string[]
-  projects: string[]
-  summary: string
-}
+const session = useSessionStore()
+const chat = useChatStore()
 
-type Question = {
-  id: string
-  category: string
-  topic: string
-  difficulty: string
-  question: string
-  reason: string
-  answer_outline: string
-}
+const panel = ref<'memory' | 'kb' | 'mcp' | null>(null)
+const memoryDraft = ref(chat.memory.notes)
 
-const labels: Record<string, string> = {
-  frontend: '前端',
-  agent: 'Agent',
-  backend: '后端',
-  easy: '简单',
-  medium: '中等',
-  hard: '困难',
-}
+const sortedThreads = computed(() =>
+  [...chat.threads].sort((a, b) => b.updatedAt - a.updatedAt),
+)
 
-const connected = ref(false)
-const statusText = ref('正在连接后端…')
-const kb = ref<KbStats | null>(null)
-const file = ref<File | null>(null)
-const count = ref(15)
-const loading = ref(false)
-const errorText = ref('')
-const profile = ref<Profile | null>(null)
-const questions = ref<Question[]>([])
+const panelTitle = computed(() => {
+  if (panel.value === 'memory') return '长期记忆'
+  if (panel.value === 'kb') return '知识库'
+  if (panel.value === 'mcp') return 'MCP'
+  return ''
+})
 
-function label(value: string) {
-  return labels[value] || value
-}
+watch(
+  () => chat.memory.notes,
+  (notes) => {
+    memoryDraft.value = notes
+  },
+)
 
-async function errorMessage(response: Response) {
-  try {
-    const body = await response.json()
-    if (typeof body.detail === 'string') return body.detail
-  } catch {
-    // 非 JSON 错误页，走下面的通用文案
+watch(panel, (name) => {
+  if (name === 'memory') memoryDraft.value = chat.memory.notes
+})
+
+function formatTime(ts: number) {
+  if (!ts) return ''
+  const date = new Date(ts)
+  const now = new Date()
+  const sameDay = date.toDateString() === now.toDateString()
+  if (sameDay) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   }
-  return `请求失败（${response.status}）`
+  return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }
 
-async function loadStatus() {
-  try {
-    const health = await fetch('/api/health')
-    if (!health.ok) throw new Error(await errorMessage(health))
-    const kbResponse = await fetch('/api/kb')
-    if (!kbResponse.ok) throw new Error(await errorMessage(kbResponse))
-    kb.value = (await kbResponse.json()) as KbStats
-    connected.value = true
-    statusText.value = '后端已连接'
-  } catch {
-    connected.value = false
-    statusText.value = '后端未连接'
-  }
+function openPanel(name: 'memory' | 'kb' | 'mcp') {
+  panel.value = panel.value === name ? null : name
 }
 
-function onFileChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  file.value = input.files?.[0] ?? null
+function closePanel() {
+  panel.value = null
 }
 
-async function recommend() {
-  if (!file.value || loading.value) return
-  loading.value = true
-  errorText.value = ''
-  profile.value = null
-  questions.value = []
-  const body = new FormData()
-  body.append('file', file.value)
-  body.append('count', String(count.value))
-  try {
-    const response = await fetch('/api/recommend', { method: 'POST', body })
-    if (!response.ok) throw new Error(await errorMessage(response))
-    const result = (await response.json()) as { profile: Profile; questions: Question[] }
-    profile.value = result.profile
-    questions.value = result.questions
-  } catch (error) {
-    errorText.value = error instanceof Error ? error.message : '生成失败'
-  } finally {
-    loading.value = false
-  }
+function saveMemoryNotes() {
+  chat.updateMemoryNotes(memoryDraft.value)
 }
 
-onMounted(loadStatus)
+function clearMemory() {
+  chat.clearMemory()
+  memoryDraft.value = ''
+}
+
+function onKey(event: KeyboardEvent) {
+  if (event.key === 'Escape') closePanel()
+}
+
+onMounted(() => {
+  void session.refresh()
+  window.addEventListener('keydown', onKey)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+})
 </script>
 
 <template>
-  <main class="page">
-    <header>
-      <p class="eyebrow">面试题推荐</p>
-      <h1>根据简历出题</h1>
-      <p class="status" :data-ok="connected">{{ statusText }}</p>
-      <p v-if="kb" class="meta">
-        知识库 {{ kb.total }} 道：前端 {{ kb.counts.frontend || 0 }}，Agent
-        {{ kb.counts.agent || 0 }}，后端 {{ kb.counts.backend || 0 }}
-      </p>
-    </header>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand-block">
+        <p class="brand">面试助手</p>
+        <p class="tagline">由浅入深</p>
+      </div>
 
-    <form class="panel" @submit.prevent="recommend">
-      <label>
-        简历
-        <input
-          type="file"
-          accept=".pdf,.docx,.md,.markdown,.txt"
-          :disabled="!connected || loading"
-          @change="onFileChange"
-        />
-      </label>
-      <label>
-        题目数量
-        <input v-model.number="count" type="number" min="10" max="20" :disabled="loading" />
-      </label>
-      <button type="submit" :disabled="!connected || !file || loading">
-        {{ loading ? '正在生成…' : '生成面试题' }}
+      <button type="button" class="new-chat" :disabled="chat.sending" @click="chat.createNewThread()">
+        <span aria-hidden="true">+</span>
+        新建对话
       </button>
-      <p v-if="loading" class="hint">读简历和选题大概需要一两分钟。</p>
-      <p v-if="errorText" class="error">{{ errorText }}</p>
-    </form>
 
-    <section v-if="profile" class="panel">
-      <h2>简历画像</h2>
-      <ul>
-        <li>方向：{{ label(profile.focus) }}</li>
-        <li>年限：{{ profile.years }}</li>
-        <li>技能：{{ profile.skills.join('、') || '未识别' }}</li>
-        <li>项目：{{ profile.projects.join('、') || '未识别' }}</li>
-        <li>摘要：{{ profile.summary || '无' }}</li>
-      </ul>
-    </section>
+      <div class="thread-list" role="list">
+        <button
+          v-for="thread in sortedThreads"
+          :key="thread.id"
+          type="button"
+          class="thread"
+          role="listitem"
+          :data-active="thread.id === chat.activeId"
+          :disabled="chat.sending"
+          @click="chat.selectThread(thread.id)"
+        >
+          <span class="thread-main">
+            <span class="thread-title">{{ thread.title }}</span>
+            <span class="thread-meta">
+              {{ thread.messages.length }} 条 · {{ formatTime(thread.updatedAt) }}
+            </span>
+          </span>
+          <span class="thread-delete" title="删除" @click.stop="chat.removeThread(thread.id)">
+            ×
+          </span>
+        </button>
+      </div>
 
-    <section v-if="questions.length" class="questions">
-      <h2>题目</h2>
-      <article v-for="(item, index) in questions" :key="item.id">
-        <h3>
-          {{ index + 1 }}.
-          <span>{{ label(item.category) }} / {{ item.topic }} / {{ label(item.difficulty) }}</span>
-          {{ item.question }}
-        </h3>
-        <p><strong>为什么问：</strong>{{ item.reason }}</p>
-        <p><strong>答题要点：</strong>{{ item.answer_outline }}</p>
-      </article>
-    </section>
-  </main>
+      <div class="rail-foot">
+        <p class="status" :data-ok="session.connected">{{ session.statusText }}</p>
+        <p v-if="session.kb" class="kb-count">题库 {{ session.kb.total }} 道</p>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="topbar-copy">
+          <p class="eyebrow">Interview Studio</p>
+          <h1>{{ chat.activeThread?.title || '对话出题' }}</h1>
+          <p class="topbar-lead">当前会话上下文随请求带上；本机可缓存画像备查。</p>
+        </div>
+        <div class="topbar-tools">
+          <button
+            type="button"
+            class="tool"
+            :data-on="panel === 'memory'"
+            @click="openPanel('memory')"
+          >
+            长期记忆
+            <span v-if="chat.hasMemory" class="dot" />
+          </button>
+          <button type="button" class="tool" :data-on="panel === 'kb'" @click="openPanel('kb')">
+            知识库
+          </button>
+          <button type="button" class="tool" :data-on="panel === 'mcp'" @click="openPanel('mcp')">
+            MCP
+          </button>
+        </div>
+      </header>
+      <ChatView class="stage" />
+    </main>
+
+    <div v-if="panel" class="drawer-backdrop" @click="closePanel" />
+    <aside v-if="panel" class="drawer" :aria-label="panelTitle">
+      <div class="drawer-head">
+        <strong>{{ panelTitle }}</strong>
+        <button type="button" class="ghost" @click="closePanel">关闭</button>
+      </div>
+      <div class="drawer-body">
+        <div v-if="panel === 'memory'" class="memory-drawer">
+          <p class="memory-hint">
+            后端不做长期记忆落库：追问时只接收前端传来的
+            <code>context</code>（最多约 1.2 万字）和当前会话
+            <code>messages</code>，请求结束即丢弃。下面内容仅缓存在本机，方便你查看或手动补充。
+          </p>
+          <div v-if="chat.hasMemory" class="memory-facts">
+            <p v-if="chat.memory.focus"><em>方向</em>{{ label(chat.memory.focus) }}</p>
+            <p v-if="chat.memory.years"><em>年限</em>{{ chat.memory.years }}</p>
+            <p v-if="chat.memory.skills.length"><em>技能</em>{{ chat.memory.skills.join('、') }}</p>
+            <p v-if="chat.memory.projects.length">
+              <em>项目</em>{{ chat.memory.projects.join('、') }}
+            </p>
+            <p v-if="chat.memory.summary"><em>摘要</em>{{ chat.memory.summary }}</p>
+          </div>
+          <p v-else class="memory-empty">还没有画像。上传简历出题后，会把摘要缓存在本机。</p>
+          <label class="memory-notes">
+            备注
+            <textarea
+              v-model="memoryDraft"
+              rows="4"
+              placeholder="例如：偏前端工程化，少问算法。"
+            />
+          </label>
+          <div class="memory-actions">
+            <button type="button" class="ghost" @click="clearMemory">清空</button>
+            <button type="button" class="accent" @click="saveMemoryNotes">保存备注</button>
+          </div>
+        </div>
+        <KnowledgeView v-else-if="panel === 'kb'" embedded />
+        <McpView v-else embedded />
+      </div>
+    </aside>
+  </div>
 </template>
 
-<style>
-body {
-  margin: 0;
-  background: #f4f1ea;
-  color: #1c1917;
-  font-family: 'Avenir Next', 'PingFang SC', 'Noto Sans SC', sans-serif;
-}
-</style>
-
 <style scoped>
-.page {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 48px 20px 80px;
+.shell {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px 12px;
+  background:
+    linear-gradient(180deg, rgba(18, 32, 46, 0.98), rgba(14, 58, 56, 0.92)),
+    #12202e;
+  color: #f4faf8;
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.brand {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.tagline {
+  margin: 4px 0 0;
+  color: rgba(244, 250, 248, 0.62);
+  font-size: 11px;
+}
+
+.new-chat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 12px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.new-chat:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.new-chat span {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.thread-list {
+  display: grid;
+  grid-auto-rows: min-content;
+  align-content: start;
+  gap: 4px;
+  margin-top: 10px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.thread {
+  display: flex;
+  align-items: center;
+  align-self: start;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.thread:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.thread[data-active='true'] {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.thread-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.thread-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.thread-meta {
+  color: rgba(244, 250, 248, 0.5);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.thread-delete {
+  display: none;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 6px;
+  color: rgba(244, 250, 248, 0.7);
+  font-size: 14px;
+  flex: none;
+}
+
+.thread:hover .thread-delete,
+.thread[data-active='true'] .thread-delete {
+  display: grid;
+}
+
+.thread-delete:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.rail-foot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.status {
+  margin: 0;
+  color: #ffb4a8;
+  font-size: 12px;
+}
+
+.status[data-ok='true'] {
+  color: #9ef0d4;
+}
+
+.kb-count {
+  margin: 4px 0 0;
+  color: rgba(244, 250, 248, 0.55);
+  font-size: 12px;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex: none;
+  padding: 12px 24px 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .eyebrow {
   margin: 0;
-  color: #78716c;
-  letter-spacing: 0.08em;
+  color: var(--accent);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
 }
 
-h1 {
-  margin: 8px 0 12px;
-  font-size: 36px;
+.topbar h1 {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 18px;
   line-height: 1.2;
-}
-
-.status {
-  display: inline-block;
-  margin: 0;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #fee2e2;
-  color: #991b1b;
-}
-
-.status[data-ok='true'] {
-  background: #dcfce7;
-  color: #166534;
-}
-
-.meta,
-.hint {
-  color: #57534e;
-}
-
-.panel,
-article {
-  margin-top: 20px;
-  padding: 20px;
-  background: #fff;
-  border: 1px solid #e7e5e4;
-  border-radius: 12px;
-}
-
-form {
-  display: grid;
-  gap: 14px;
-}
-
-label {
-  display: grid;
-  gap: 6px;
+  letter-spacing: -0.02em;
   font-weight: 600;
 }
 
-input[type='number'] {
-  width: 96px;
-  padding: 8px 10px;
-  border: 1px solid #d6d3d1;
-  border-radius: 8px;
-  font: inherit;
+.topbar-lead {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
-button {
-  width: fit-content;
-  padding: 10px 16px;
-  border: 0;
+.topbar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.tool,
+.ghost,
+.accent {
   border-radius: 8px;
-  background: #1c1917;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tool[data-on='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
-  font: inherit;
-  cursor: pointer;
 }
 
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
+.tool[data-on='true'] .dot {
+  background: #fff;
 }
 
-.error {
+.accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 32, 46, 0.28);
+  backdrop-filter: blur(2px);
+  z-index: 20;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 100vw);
+  height: 100vh;
+  background: #f7faf8;
+  box-shadow: -18px 0 50px rgba(18, 32, 46, 0.16);
+}
+
+.drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.memory-drawer {
+  padding: 16px 18px 28px;
+}
+
+.memory-hint {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(18, 32, 46, 0.04);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.memory-hint code {
+  font-size: 12px;
+}
+
+.memory-facts {
+  display: grid;
+  gap: 8px;
+}
+
+.memory-facts p,
+.memory-empty {
   margin: 0;
-  color: #b91c1c;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
-h2 {
-  margin: 0 0 12px;
-  font-size: 20px;
+.memory-empty {
+  color: var(--muted);
 }
 
-ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-li + li {
-  margin-top: 6px;
-}
-
-article h3 {
-  margin: 0 0 10px;
-  font-size: 18px;
-  line-height: 1.45;
-}
-
-article h3 span {
+.memory-facts em {
   display: inline-block;
   margin-right: 8px;
-  color: #78716c;
-  font-size: 13px;
-  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-article p {
-  margin: 8px 0 0;
-  line-height: 1.6;
+.memory-notes {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.memory-notes textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.memory-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+@media (max-width: 860px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .rail {
+    max-height: 36vh;
+  }
+
+  .thread-list {
+    max-height: 140px;
+  }
+
+  .topbar {
+    flex-direction: column;
+  }
+
+  .workspace {
+    min-height: 60vh;
+  }
 }
 </style>

@@ -24,6 +24,19 @@ export default defineConfig({
         changeOrigin: true,
         timeout: 300000,
         proxyTimeout: 300000,
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes, _req, res) => {
+            const type = String(proxyRes.headers['content-type'] || '')
+            if (!type.includes('text/event-stream')) return
+            // 避免开发代理把 SSE 缓冲成一整段再吐给浏览器
+            res.setHeader('Cache-Control', 'no-cache, no-transform')
+            res.setHeader('X-Accel-Buffering', 'no')
+            res.setHeader('Connection', 'keep-alive')
+            if (typeof (res as { flushHeaders?: () => void }).flushHeaders === 'function') {
+              ;(res as { flushHeaders: () => void }).flushHeaders()
+            }
+          })
+        },
       },
     },
   },

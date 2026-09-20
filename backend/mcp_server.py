@@ -9,15 +9,17 @@ if str(ROOT) not in sys.path:
 
 from mcp.server.mcpserver import MCPServer
 
+from src.mcp_catalog import SERVER_NAME, TOOLS
 from src.web_questions import search_interview_questions
 
-server = MCPServer("interview-web")
+server = MCPServer(SERVER_NAME)
+_search_tool = TOOLS[0]
 
 
 @server.tool(
-    name="search_interview_questions",
-    title="联网查面试题",
-    description="按技术主题上网检索公开面试题，返回题目、来源标题和链接。不会写入本地知识库。",
+    name=_search_tool["name"],
+    title=_search_tool["title"],
+    description=_search_tool["description"],
 )
 def search_interview_questions_tool(topic: str, limit: int = 8) -> str:
     """联网检索面试题。

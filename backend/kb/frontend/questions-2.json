@@ -1,0 +1,344 @@
+[
+  {
+    "id": "fe-vue-008",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "v-if", "v-show"],
+    "difficulty": "easy",
+    "question": "v-if 和 v-show 都是控制显示，切换很频繁时你选哪个？为什么？",
+    "answer_outline": "v-if 是真正销毁和重建，适合很少出现的块，初始不必渲染。v-show 只切 display，适合频繁开关的面板。切换成本高、里面有状态要保留时用 v-show；没渲染就不要付出初始化成本时用 v-if。"
+  },
+  {
+    "id": "fe-vue-009",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "key", "组件"],
+    "difficulty": "medium",
+    "question": "同一个组件从「编辑 A」切到「编辑 B」，表单还留着上一条的数据，你会怎么处理？",
+    "answer_outline": "给组件绑上随业务 id 变化的 key，让 Vue 销毁旧实例再挂新的，本地状态会一起清掉。只改 props 而不换 key 时，组件实例复用，里面的 ref 不会自动重置。也可以显式 watch id 再重置，但 key 更不容易漏字段。"
+  },
+  {
+    "id": "fe-vue-010",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "watch", "watcheffect"],
+    "difficulty": "medium",
+    "question": "watch 和 watchEffect 都能做副作用，依赖关系上有什么差别？",
+    "answer_outline": "watch 要显式写出监听源，可以拿到旧值和新值，默认不立即执行。watchEffect 会在执行时自动收集用到的响应式数据，立刻跑一次，没有旧值。依赖明确、要对比前后值时用 watch；依赖多且都在函数里读时用 watchEffect。"
+  },
+  {
+    "id": "fe-vue-011",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "keep-alive", "vue-router"],
+    "difficulty": "medium",
+    "question": "列表进详情再返回，滚动位置和筛选条件丢了。keep-alive 能解决什么，又会带来什么问题？",
+    "answer_outline": "把路由组件包进 keep-alive 后，离开时不销毁，onActivated 和 onDeactivated 代替反复的挂载卸载。状态和滚动能留下来。代价是缓存会占内存，数据可能过期。要用 include 限制缓存谁，并在激活时决定要不要重新请求。"
+  },
+  {
+    "id": "fe-vue-012",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "vue-router", "导航守卫"],
+    "difficulty": "medium",
+    "question": "登录校验放在全局路由守卫里，有哪些请求不该放在守卫里做？",
+    "answer_outline": "守卫适合做同步或很短的鉴权判断，决定放行还是去登录页。不要在里面拉整页业务数据，否则每次跳转都被拖住，失败了用户停在半路。页面数据放到组件里请求，并处理好守卫的 next 只调用一次。"
+  },
+  {
+    "id": "fe-vue-013",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "slot", "作用域插槽"],
+    "difficulty": "medium",
+    "question": "普通插槽和作用域插槽分别由谁提供数据？表格组件什么时候必须用作用域插槽？",
+    "answer_outline": "普通插槽的内容在父组件作用域编译，子组件只决定放哪。作用域插槽由子组件把一行数据传出来，父组件决定这一格怎么画。列内容每种业务不一样、但行数据在子组件手里时，要用作用域插槽，而不是在子组件里写死所有列。"
+  },
+  {
+    "id": "fe-vue-014",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "v-model", "组件"],
+    "difficulty": "easy",
+    "question": "在组件上写 v-model 时，父子之间实际传的是什么？",
+    "answer_outline": "默认是名为 modelValue 的 prop，加上 update:modelValue 事件。子组件不要直接改这个 prop，应通过事件把新值交给父组件。多个绑定可以写成 v-model:title 这类参数。Vue 3.4 起也可以用 defineModel 少写样板。"
+  },
+  {
+    "id": "fe-vue-015",
+    "category": "frontend",
+    "topic": "Vue",
+    "tags": ["vue", "shallowref", "性能"],
+    "difficulty": "hard",
+    "question": "一份很大的只读列表，为什么有时要用 shallowRef 而不是 ref？",
+    "answer_outline": "ref 会深度把对象变成响应式，大列表的每一层都有代理成本。列表整体替换、不追踪内部字段变化时，shallowRef 只在替换 .value 时触发更新。要改其中一项，需要换一个新数组或手动 triggerRef，否则界面不会动。"
+  },
+  {
+    "id": "fe-react-007",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "useeffect", "hooks"],
+    "difficulty": "medium",
+    "question": "useEffect 的依赖数组漏写了一个变量，会出现什么现象？清理函数要清什么？",
+    "answer_outline": "闭包会抓住第一次渲染的旧值，请求和订阅一直用过期数据。依赖要包含 effect 里用到、且会变的值。清理函数在下次 effect 前和卸载时执行，用来取消请求、解绑订阅和清定时器，避免旧请求后返回把状态写乱。"
+  },
+  {
+    "id": "fe-react-008",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "useref", "usestate"],
+    "difficulty": "easy",
+    "question": "计时器 id、输入框 DOM，为什么放 useRef 而不是 useState？",
+    "answer_outline": "改 ref 不会触发渲染，适合存不需要画到界面上的可变值，也能在多次渲染之间保持同一个对象。DOM 节点由 React 写入 ref。如果改完必须刷新界面，那才是 state。不要在渲染期间去读一个刚刚才改的 ref 来决定输出。"
+  },
+  {
+    "id": "fe-react-009",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "error boundary", "异常"],
+    "difficulty": "medium",
+    "question": "子组件渲染时抛错，错误边界能接住什么，接不住什么？",
+    "answer_outline": "错误边界接得住子组件渲染、生命周期和构造函数里的异常，用来换成兜底界面，避免整棵树卸掉。它接不住事件处理函数、异步代码和错误边界自己的错误。那些仍要 try/catch，再配合全局上报。"
+  },
+  {
+    "id": "fe-react-010",
+    "category": "frontend",
+    "topic": "React",
+    "tags": ["react", "受控组件", "表单"],
+    "difficulty": "easy",
+    "question": "受控输入和非受控输入差在哪？什么时候非受控更合适？",
+    "answer_outline": "受控组件的值放在 state，每次按键都经过 React。适合要即时校验、格式化或按钮依赖输入的表单。非受控用 defaultValue 和 ref，提交时再读。字段很多、输入过程不需要驱动别的界面时，非受控可以少掉一轮轮渲染。"
+  },
+  {
+    "id": "fe-css-011",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "外边距", "折叠"],
+    "difficulty": "medium",
+    "question": "上下两个块的 margin 为什么会叠成一个，而不是相加？怎样让它们真的隔开？",
+    "answer_outline": "相邻块级元素的垂直外边距会折叠，取较大的那个。父子之间如果父元素没有边框、内边距或 BFC，子元素的 margin 也会穿出去。要隔开可以用 padding、border，或让父元素成为 BFC，例如 overflow 不为 visible。"
+  },
+  {
+    "id": "fe-css-012",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "transition", "animation"],
+    "difficulty": "easy",
+    "question": "过渡和关键帧动画分别适合什么交互？",
+    "answer_outline": "transition 适合从状态 A 到状态 B，比如悬停变色，需要有属性变化来触发。animation 可以自播放、循环、分多段，适合加载指示。两者都尽量动 transform 和 opacity，避免动画过程中触发布局。"
+  },
+  {
+    "id": "fe-css-013",
+    "category": "frontend",
+    "topic": "CSS",
+    "tags": ["css", "rem", "em", "响应式"],
+    "difficulty": "easy",
+    "question": "字号和间距用 px、em、rem，分别会跟着谁变？",
+    "answer_outline": "px 是固定像素。em 相对当前元素的字号，嵌套时会连乘。rem 相对根元素字号，改 html 的 font-size 就能整体缩放，组件库里比 em 好控制。视口相关的布局可以用 vw，但字号通常仍用 rem，避免用户放大文字时失效。"
+  },
+  {
+    "id": "fe-js-017",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "weakmap", "内存"],
+    "difficulty": "medium",
+    "question": "用对象当键缓存一些附加数据时，为什么有时用 WeakMap 而不是普通对象？",
+    "answer_outline": "普通对象的键只能是字符串或 Symbol，拿对象当键会被转成字符串，还要自己删缓存。WeakMap 的键必须是对象，且是弱引用，对象没人用时缓存可以一起被回收，适合给 DOM 或组件实例挂私有数据。"
+  },
+  {
+    "id": "fe-js-018",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "for-in", "for-of"],
+    "difficulty": "easy",
+    "question": "遍历数组时 for-in 和 for-of 拿到的分别是什么？for-in 有什么坑？",
+    "answer_outline": "for-in 遍历可枚举的键，数组上会得到下标字符串，还可能把原型上后来加上的可枚举属性也算进去，顺序也不保证是数字序。for-of 走迭代器，数组拿到的是元素值。遍历数组、Map、Set 用 for-of 或数组方法。"
+  },
+  {
+    "id": "fe-js-019",
+    "category": "frontend",
+    "topic": "JavaScript",
+    "tags": ["javascript", "abortcontroller", "fetch"],
+    "difficulty": "medium",
+    "question": "搜索框连续发请求，怎样取消已经过期的那一次？",
+    "answer_outline": "用 AbortController 把 signal 传给 fetch。下一次输入时 abort 上一个控制器，再新建一个。组件卸载时也要 abort。只在界面上忽略旧响应不够，请求仍占着连接；取消后要分清是用户取消还是真的失败，不要把它报成错误提示。"
+  },
+  {
+    "id": "fe-ts-007",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "keyof", "typeof"],
+    "difficulty": "medium",
+    "question": "keyof 和 typeof 在类型位置上分别取出什么？",
+    "answer_outline": "typeof 放在类型位置时，从值推出类型，比如配置对象推出它的形状。keyof 取出这个类型的键的联合。两者常连用，用来约束函数参数必须是某个对象真实存在的键，避免手写一份会过期的字符串联合。"
+  },
+  {
+    "id": "fe-ts-008",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "as const", "字面量"],
+    "difficulty": "easy",
+    "question": "对象后面加 as const 之后，类型推断会有什么变化？",
+    "answer_outline": "属性会变成只读的字面量类型，而不是被放宽成 string 或 number。路由表、状态常量这样用，后面 keyof 或索引才能得到精确联合。它是编译期断言，运行时对象并没有被冻结。"
+  },
+  {
+    "id": "fe-ts-009",
+    "category": "frontend",
+    "topic": "TypeScript",
+    "tags": ["typescript", "never", "联合类型"],
+    "difficulty": "hard",
+    "question": "联合类型的 switch 写完后，为什么有人会加一个返回 never 的默认分支？",
+    "answer_outline": "如果前面的分支已经穷尽，默认分支的参数类型就是 never，给它赋值会报错。以后新增一种联合成员而忘记处理时，编译会失败。这比默默走到 default 返回空更安全。never 表示不该有值的位置。"
+  },
+  {
+    "id": "fe-browser-008",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "bfcache", "pageshow"],
+    "difficulty": "hard",
+    "question": "用户按返回键回到列表页，接口没重发，页面却像是旧的。和往返缓存有什么关系？",
+    "answer_outline": "浏览器可能把整个页面放进往返缓存，返回时不重新加载，load 不会再来一遍。要在 pageshow 里看 persisted，为 true 时再刷新会过期的数据。卸载时如果还有未关闭的连接，有的浏览器会放弃使用这份缓存。"
+  },
+  {
+    "id": "fe-browser-009",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "history", "路由"],
+    "difficulty": "medium",
+    "question": "前端路由用 history 模式时，pushState 改了地址，为什么刷新会 404？",
+    "answer_outline": "pushState 只改浏览器历史，不会向服务器要新页面。刷新时服务器按这个路径找文件，找不到就 404。要让所有前端路由都回落到 index.html，再由前端路由接管。hash 模式没有这个问题，因为井号后面不会发给服务器。"
+  },
+  {
+    "id": "fe-browser-010",
+    "category": "frontend",
+    "topic": "浏览器",
+    "tags": ["浏览器", "intersectionobserver", "懒加载"],
+    "difficulty": "medium",
+    "question": "图片懒加载为什么优先用 IntersectionObserver，而不是监听 scroll？",
+    "answer_outline": "scroll 监听频繁，还要自己算位置，容易强制布局。IntersectionObserver 由浏览器在元素进入视口时回调，可以设 rootMargin 提前加载。观察结束后要 unobserve。它也能用来做曝光统计，不必把计算放在滚动回调里。"
+  },
+  {
+    "id": "fe-net-007",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["http", "preload", "prefetch", "性能"],
+    "difficulty": "medium",
+    "question": "preload、prefetch 和 preconnect 分别提前做了什么？用错会怎样？",
+    "answer_outline": "preload 是当前页马上要用的资源，优先级高。prefetch 是下一步可能用的，优先级低。preconnect 提前完成 DNS、TCP 和 TLS。把本页关键资源标成 prefetch 会太晚；把不一定用的大包 preload 会抢带宽。"
+  },
+  {
+    "id": "fe-net-008",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["http", "竞态", "fetch"],
+    "difficulty": "medium",
+    "question": "详情页快速切换两条记录时，为什么后点的那条有时会显示先点的数据？",
+    "answer_outline": "两次请求谁先回来不确定，后返回的旧请求会覆盖新状态。要给每次请求一个序号或取消上一次，只采纳最后一次的结果。这是竞态，不是接口偶然写错。加载态也要跟着当前 id 走，不能共用一个布尔值就算完。"
+  },
+  {
+    "id": "fe-net-009",
+    "category": "frontend",
+    "topic": "网络",
+    "tags": ["cdn", "缓存", "http"],
+    "difficulty": "medium",
+    "question": "静态资源放上 CDN 之后，发版怎样避免用户还在用旧的 JS？",
+    "answer_outline": "带内容哈希的文件名可以长期缓存，内容变了地址就变。HTML 入口缓存要短，或不缓存，这样发版后先拿到新 HTML，再去拉新哈希的包。只改文件内容却不改 URL，CDN 和浏览器都会继续用旧包。"
+  },
+  {
+    "id": "fe-perf-008",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "字体", "cls"],
+    "difficulty": "medium",
+    "question": "自定义字体加载完之后文字突然一跳，这是什么问题？怎么减轻？",
+    "answer_outline": "这是布局偏移，字体度量不同把行高撑开了。可以用 font-display: swap 先显示后备字体，同时选度量接近的后备字体，或给文本预留相近的行高。关键字体再考虑 preload，避免又慢又跳。"
+  },
+  {
+    "id": "fe-perf-009",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "ssr", "csr"],
+    "difficulty": "hard",
+    "question": "首屏改成服务端渲染之后，用户更快看到内容，但页面仍可能点不了。差在哪？",
+    "answer_outline": "服务端先吐出 HTML，首屏内容早，但交互要等客户端 JS 下载、执行并完成水合。水合前按钮没有事件。数据请求如果仍等客户端才发，收益会小。要分清首次绘制和可交互，不要只看 HTML 出来了没有。"
+  },
+  {
+    "id": "fe-perf-010",
+    "category": "frontend",
+    "topic": "性能",
+    "tags": ["性能", "hydration", "ssr", "vue", "react"],
+    "difficulty": "hard",
+    "question": "服务端渲染和客户端水合对不上时，页面会怎样？常见原因是什么？",
+    "answer_outline": "React 或 Vue 发现标记和虚拟树不一致，会丢弃一段服务端 HTML 再客户端重绘，首屏闪一下，控制台有水合警告。常见原因是渲染用了 Date.now、随机数、窗口宽度，或服务端和客户端数据不一样。这些值要延后到挂载后再读。"
+  },
+  {
+    "id": "fe-eng-008",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "微前端", "module federation"],
+    "difficulty": "hard",
+    "question": "什么情况下才会把前端拆成微前端？拆开后最难对齐的是什么？",
+    "answer_outline": "适合多个团队独立发布、技术栈暂时不能统一的大系统。不适合一个小组的中型项目，那只是增加加载和通信成本。最难的是公共依赖版本、登录态、样式隔离和路由谁说了算。基座和子应用要约定版本，避免各打一份 React。"
+  },
+  {
+    "id": "fe-eng-009",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "pnpm", "npm", "依赖"],
+    "difficulty": "medium",
+    "question": "pnpm 为什么能发现「用了但没有声明」的依赖？npm 有时为什么发现不了？",
+    "answer_outline": "npm 会把依赖摊平到 node_modules，所以能 require 到别人带进来的包，形成幽灵依赖。pnpm 用符号链接，项目只能访问自己声明的直接依赖。没有声明的包在 pnpm 下会找不到，迫使你把它写进 package.json，换包管理器时才不容易突然坏掉。"
+  },
+  {
+    "id": "fe-eng-010",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["工程化", "ci", "lint"],
+    "difficulty": "easy",
+    "question": "合并前的 CI 至少跑哪些检查？为什么不能只靠本地 lint？",
+    "answer_outline": "至少跑安装、类型检查、lint、单元测试和一次生产构建。本地钩子可以被跳过，分支也可能没装同一套依赖。CI 用锁文件安装，失败就挡住合并。端到端测试可以放在更后面，避免每次提交都跑全套浏览器。"
+  },
+  {
+    "id": "fe-sec-003",
+    "category": "frontend",
+    "topic": "安全",
+    "tags": ["安全", "xss", "vue", "csp"],
+    "difficulty": "medium",
+    "question": "Vue 里用 v-html 渲染后端返回的富文本，要额外做什么？",
+    "answer_outline": "v-html 不会转义，等同于把字符串当 HTML 插入。必须在入库或输出前用白名单清洗，去掉 script 和事件属性。再用内容安全策略限制脚本来源。不要相信「这是管理后台，用户都是自己人」而不做清洗。"
+  },
+  {
+    "id": "fe-sec-004",
+    "category": "frontend",
+    "topic": "安全",
+    "tags": ["安全", "点击劫持", "iframe"],
+    "difficulty": "medium",
+    "question": "怎样降低自己的页面被别人用透明 iframe 盖住诱导点击的可能？",
+    "answer_outline": "响应头用 CSP 的 frame-ancestors 或 X-Frame-Options，禁止陌生站点嵌本页。前端判断是否在 iframe 里只能当辅助，不能当唯一防护，因为父页面可以限制子页面脚本。敏感操作再加一次明确确认。"
+  },
+  {
+    "id": "fe-test-001",
+    "category": "frontend",
+    "topic": "测试",
+    "tags": ["测试", "vitest", "单元测试"],
+    "difficulty": "easy",
+    "question": "组件的分支逻辑和整条登录流程，分别该放在哪一层测试？",
+    "answer_outline": "纯函数和组件的条件渲染、事件回调用单元测试，快而且好定位。登录这种跨页面、依赖真实路由和接口形状的流程用少量端到端测试。不要把所有接口细节都做成浏览器测试，会慢且容易因文案改动失败。"
+  },
+  {
+    "id": "fe-test-002",
+    "category": "frontend",
+    "topic": "测试",
+    "tags": ["测试", "mock", "接口"],
+    "difficulty": "medium",
+    "question": "单元测试里把请求全部 mock 掉之后，还有什么缺陷测不到？",
+    "answer_outline": "测不到真实的状态码、字段名和超时。mock 和后端一改就会悄悄分叉。契约可以另用一份schema或对测试环境做少量集成请求。组件测试只验证自己如何处理成功、空和失败三种结果，不要假装已经测过后端。"
+  },
+  {
+    "id": "fe-node-001",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["bff", "node", "接口"],
+    "difficulty": "medium",
+    "question": "前端为什么有时要加一层 BFF，而不是页面直接调多个后端服务？",
+    "answer_outline": "BFF 按页面聚合字段，避免浏览器发一串请求，也避免把内部服务地址暴露给前端。它可以裁剪字段、统一错误。代价是多一层部署和超时处理。字段和后端已经一一对应、又没有聚合需求时，就不必再包一层。"
+  }
+]

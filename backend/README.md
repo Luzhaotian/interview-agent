@@ -1,19 +1,28 @@
 # 面试题推荐 Agent
 
-扫描一份简历，从本地知识库里选出 10 到 20 道面试题。题库以前端为主，也包含 Agent 和后端。选题必须来自知识库，不会凭空编题。
+扫描简历，选出 10 到 20 道面试题。题库以前端为主，也包含 Agent 和后端。基础、框架和架构题只能用知识库或当次联网补到的题，不改题干。过往经历题根据简历来写。
 
-DeepSeek 只负责读简历和从候选题里挑选。检索在本机完成，不需要向量模型。
+DeepSeek 负责读简历和从候选题里挑选。检索在本机完成，不需要向量模型。
 
 ## 目录
 
+以下路径都相对 `backend/`。
+
 ```text
-interview-agent/
-├── main.py                 # 命令行入口
+backend/
+├── main.py                 # ingest / recommend / serve
+├── mcp_server.py           # 给 Cursor 手动调用的联网查题服务
+├── run_mcp.sh
 ├── src/
+│   ├── api.py              # HTTP 接口
 │   ├── graph.py            # LangGraph 流程
 │   ├── kb.py               # 扫描知识库、BM25 检索
+│   ├── rules.py            # 读取 rules/ 里的规则和建议
+│   ├── web_questions.py    # 联网查题（推荐流程直接调用）
 │   ├── resume.py           # 读取简历
-│   └── llm.py              # DeepSeek 客户端
+│   ├── llm.py              # DeepSeek 客户端
+│   └── mcp_catalog.py      # MCP 工具说明
+├── rules/                  # 可编辑的规则与建议
 ├── kb/
 │   ├── frontend/           # 前端题
 │   ├── agent/              # Agent 题
@@ -25,14 +34,14 @@ interview-agent/
 └── requirements.txt
 ```
 
-种子题大约为：前端 82、Agent 25、后端 30。
+种子题大约为：前端 120、Agent 45、后端 50。
 
 ## 准备
 
 需要 Python 3.9 或以上。
 
 ```bash
-cd interview-agent
+cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -59,7 +68,7 @@ QUESTION_COUNT=15
 
 ## 使用
 
-在项目目录下执行。
+在 `backend` 目录下执行。
 
 ```bash
 python main.py ingest
@@ -89,19 +98,25 @@ python main.py recommend resumes/你的简历.md --count 12
 
 1. **扫描简历**。抽出纯文本，最多取前 12000 字送给模型。
 2. **抽取画像**。DeepSeek 返回年限、方向（`frontend` / `backend` / `agent`）、技能、项目和两句摘要。方向无法识别时按前端处理。
-3. **检索**。用结巴分词和 BM25 从索引里取大约 40 道候选。方向匹配的题会加权。简历里出现 MySQL、LangGraph、RAG 这类技能时，会额外带上对应分类的题；纯前端简历则候选几乎都是前端题。
-4. **选题**。DeepSeek 只能使用候选题的 id。无效 id 会被丢掉，数量不够时用检索结果补齐，仍然不会编新题。
+3. **检索**。用结巴分词和 BM25 从索引里取大约 40 道候选。方向匹配的题会加权。简历里出现 MySQL、LangGraph、RAG 这类技能时，会额外带上对应分类的题；纯前端简历则候选几乎都是前端题。若某项技能几乎没有对应题，会在进程内调用 `search_interview_questions` 补候选，不经过 `.cursor/mcp.json`。
+4. **选题**。知识库题和联网补题只能使用候选 id，无效 id 会被丢掉，数量不够时用检索结果补齐，不改题干。过往经历题另根据简历生成，并点名具体项目。选题和措辞还会读 `rules/suggestions.md`。
 5. **写报告**。每题包含分类、主题、难度、为什么问，以及答题要点。
+
+网页上的「是否可约面试」走 `POST /api/screen/stream`，标准来自 `rules/interview-gate.md`。多份简历会逐份判断，不是合成一份结论。命令行没有单独的筛选命令。
 
 报告示例：
 
 ```markdown
-### 1. [前端 / Vue / 中等] Vue 3 的响应式和 Vue 2 有什么差别？
+### 1. [框架 / 前端 / Vue / 中等] Vue 3 的响应式和 Vue 2 有什么差别？
 
 **为什么问：** 简历里的项目使用 Vue 3。
 
-**答题要点：** Vue 3 用 Proxy 追踪新增和删除属性……
+**回答方向：** 先讲 Proxy 相对 defineProperty 的差异，再举项目里新增属性的例子。
+
+**参考答案：** Vue 3 用 Proxy 追踪新增和删除属性……
 ```
+
+题目会按 `foundation`（基础）→ `framework`（框架）→ `architecture`（架构经验）→ `experience`（过往经历）排序。
 
 难度在文件里写成 `easy` / `medium` / `hard`，报告里显示为简单 / 中等 / 困难。
 
@@ -151,6 +166,15 @@ difficulty: medium
 ```
 
 标题文字就是 `id`。`题目：` 和 `要点：` 必填。
+
+## 规则与建议
+
+可编辑的规则写在 `rules/`，出题和「是否可约面试」都会读进去：
+
+- `rules/interview-gate.md`：是否进入可约面试
+- `rules/suggestions.md`：选题、经历题、追问和措辞
+
+直接改这两份 Markdown。题量配额，以及基础、框架、架构题必须来自候选题，仍由程序保证。`.cursor/mcp.json` 不参与出题，只给 Cursor 对话手动调用 `interview-web`。
 
 ## 为什么不用向量检索
 

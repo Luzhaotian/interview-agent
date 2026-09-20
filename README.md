@@ -1,8 +1,10 @@
 # 面试题推荐 Agent
 
-上传一份简历，从本地知识库里选出 10 到 20 道面试题。题库以前端为主，也包含 Agent 和后端。选题必须来自知识库，不会凭空编题。
+上传简历后，选出 10 到 20 道面试题，按基础、框架、架构经验、过往经历排布。题库以前端为主，也包含 Agent 和后端。基础、框架和架构题只能用知识库或当次联网补到的题，不改题干。过往经历题根据简历来写。
 
-DeepSeek 只负责读简历和从候选题里挑选。检索在本机完成，不需要向量模型。
+一次可以上传多份简历，每份单独出题，也可以单独判断是否进入可约面试。
+
+DeepSeek 负责读简历和从候选题里挑选。检索在本机完成，不需要向量模型。
 
 ## 目录
 
@@ -11,12 +13,24 @@ interview-agent/
 ├── start.sh                 # 一键启动前后端
 ├── backend/                 # Python 服务与命令行
 │   ├── main.py              # ingest / recommend / serve
+│   ├── rules/               # 可编辑的规则与建议
 │   ├── src/                 # 流程、检索、简历解析、HTTP 接口
 │   ├── kb/                  # 前端、Agent、后端题库
 │   ├── resumes/             # 放简历（命令行用法）
 │   └── README.md            # 流程、环境变量、题库格式
 └── web/                     # Vue 3 前端
 ```
+
+## 规则与建议
+
+面试门槛和出题建议写在 Markdown 里，改完保存即可，不用改代码。下次出题或判断会重新读取。
+
+| 文件 | 作用 |
+| --- | --- |
+| `backend/rules/interview-gate.md` | 是否可约面试的规则和建议 |
+| `backend/rules/suggestions.md` | 出题、开场说明、追问时的建议 |
+
+题量限制和「只能从知识库选题、禁止编造新题」仍由程序保证。这里写的是额外规则和建议。
 
 ## 准备
 
@@ -55,7 +69,9 @@ cd web
 npm install
 ```
 
-然后回到仓库根目录执行 `./start.sh`。开发服务器会把 `/api` 代理到后端。页面会显示知识库题量；上传 PDF、DOCX、Markdown 或 TXT 后即可生成题目。数量限制在 10 到 20，生成大约需要一两分钟。索引不存在或比知识库旧时，后端会自动重建，不必先手动 `ingest`。
+然后回到仓库根目录执行 `./start.sh`。开发服务器会把 `/api` 代理到后端。页面会显示知识库题量。上传 PDF、DOCX、Markdown 或 TXT 即可生成题目，也可以把文件拖进页面，一次最多 8 个，每个不超过 10MB。多份简历各自返回一份结果。Enter 发送，Shift + Enter 换行。数量限制在 10 到 20，生成大约需要一两分钟。索引不存在或比知识库旧时，后端会自动重建，不必先手动 `ingest`。
+
+输入框下方有两条推荐文案：按基础到经历出 15 道题，以及判断是否进入可约面试。可约面试的标准写在 `backend/rules/interview-gate.md`。
 
 也可以分开启动：`python main.py serve`（在 `backend` 目录，默认 `http://127.0.0.1:8000`）和 `npm run dev`（在 `web` 目录）。
 
@@ -77,15 +93,21 @@ python main.py recommend resumes/你的简历.md --count 12
 | --- | --- | --- |
 | `GET` | `/api/health` | 健康检查 |
 | `GET` | `/api/kb` | 返回题库总数和分类计数 |
-| `POST` | `/api/recommend` | 上传简历并选题。表单字段：`file`、`count` |
+| `GET` | `/api/kb/questions` | 返回题目列表，供知识库页面查看 |
+| `GET` | `/api/mcp` | 返回当前 MCP 服务和工具说明 |
+| `POST` | `/api/chat` | 对话追问。JSON：`messages`、可选 `context`、`selected_ids`、`profile`、`count` |
+| `POST` | `/api/chat/stream` | 同上，SSE：`thinking` / `token` / `question` / `decision` / `error` / `done` |
+| `POST` | `/api/recommend` | 上传简历并选题。表单字段：`files`（可多个）、`count`。多份时看 `results`；只有一份时仍带顶层 `profile` 和 `questions` |
+| `POST` | `/api/recommend/stream` | 同上，SSE：`resume` / `thinking` / `profile` / `question` / `token` / `error` / `done` |
+| `POST` | `/api/screen/stream` | 判断是否可约面试。表单字段：`files`。SSE：`resume` / `thinking` / `profile` / `decision` / `token` / `error` / `done` |
 
-简历不超过 10MB。跨域只允许 `http://127.0.0.1:5173` 和 `http://localhost:5173`。
+每个简历不超过 10MB，一次最多 8 个。跨域只允许 `http://127.0.0.1:5173` 和 `http://localhost:5173`。
 
 ## 联网查题
 
-项目带了一个 MCP 服务 `interview-web`，工具名是 `search_interview_questions`。给一个技术主题，它会到网上检索公开面试题，并带回出处链接。查到的题不会写入本地知识库。
+上传简历出题时，先抽画像并检索本地知识库。若某项技能几乎没有对应题，推荐流程会直接调用 `search_interview_questions` 补候选，再选题。这是进程内函数调用，不读 `.cursor/mcp.json`。查到的题不写入本地知识库，页面会标成「联网」。
 
-配置在 `.cursor/mcp.json`。在 Cursor 里启用 `interview-web` 后即可调用。依赖已经写在 `backend/requirements.txt` 的 `mcp` 里，虚拟环境需要装过这份依赖。
+同一套检索另有一个 MCP 服务 `interview-web`（`backend/mcp_server.py`），只给 Cursor 对话里手动调用。`.cursor/mcp.json` 仅在这种情况下有用，网页出题不依赖它。依赖见 `backend/requirements.txt` 的 `mcp`。
 
 ## 更多
 

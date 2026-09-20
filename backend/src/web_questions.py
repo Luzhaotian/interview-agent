@@ -22,15 +22,29 @@ def search_interview_questions(topic: str, limit: int = 8) -> str:
     if not topic:
         return "请提供要查询的技术主题，例如 Vue3 响应式、MySQL 索引。"
     limit = max(1, min(12, int(limit)))
-    query = topic if "面试" in topic else f"{topic} 面试题"
-    hits = _merge(_search_bing(query), _search_bing(f"{topic} 高频面试题"))
-    hits = _rank(hits)
-    if not hits:
-        return f"没有搜到和「{query}」相关的公开页面。"
+    payload = search_interview_questions_payload(topic, limit)
+    if not payload["questions"] and not payload["hits"]:
+        return f"没有搜到和「{payload['query']}」相关的公开页面。"
+    return _format(payload["query"], payload["questions"], payload["hits"][:6])
 
+
+def search_interview_questions_payload(topic: str, limit: int = 8) -> dict:
+    """结构化联网检索，供推荐流程与 MCP 工具共用。"""
+    topic = (topic or "").strip()
+    limit = max(1, min(12, int(limit or 8)))
+    if not topic:
+        return {"query": "", "questions": [], "hits": []}
+    query = topic if "面试" in topic else f"{topic} 面试题"
+    try:
+        hits = _merge(_search_bing(query), _search_bing(f"{topic} 高频面试题"))
+        hits = _rank(hits)
+    except Exception:
+        return {"query": query, "questions": [], "hits": []}
+    if not hits:
+        return {"query": query, "questions": [], "hits": []}
     pages = [hit for hit in hits if "面试" in hit["title"] or "面试" in hit["snippet"]]
     questions = _collect_questions((pages or hits)[:4], limit)
-    return _format(query, questions, hits[:6])
+    return {"query": query, "questions": questions, "hits": hits}
 
 
 def _search_bing(query: str) -> list[dict]:

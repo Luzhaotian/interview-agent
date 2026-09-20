@@ -87,6 +87,15 @@ if [[ ! -f "$ROOT/backend/.env" ]]; then
 fi
 
 echo "正在启动后端 http://127.0.0.1:8000"
+if command -v lsof >/dev/null 2>&1; then
+  OLD_PIDS="$(lsof -nP -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -n "$OLD_PIDS" ]]; then
+    echo "检测到 8000 端口占用，正在结束旧进程：$OLD_PIDS"
+    # shellcheck disable=SC2086
+    kill $OLD_PIDS 2>/dev/null || true
+    sleep 0.8
+  fi
+fi
 (
   cd "$ROOT/backend"
   exec "$PYTHON" main.py serve
