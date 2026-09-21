@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 
+import IGButton from '@/components/IGButton.vue'
 import { label, stageOrder } from '@/lib/labels'
 import { renderMarkdown } from '@/lib/markdown'
-import { readSse, type SseEvent } from '@/lib/sse'
+import { readSse, isAbortError, type SseEvent } from '@/lib/sse'
 import { createTypewriter } from '@/lib/typewriter'
 import {
   messageText,
@@ -27,6 +28,14 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const scroller = ref<HTMLElement | null>(null)
 const notice = ref('')
 const dragging = ref(false)
+const stickToBottom = ref(true)
+const showJumpBottom = ref(false)
+const BOTTOM_GAP = 72
+let scrollingProgrammatically = false
+let jumpTimer = 0
+let activeAbort: AbortController | null = null
+const activeMarkerId = ref('')
+const hoveredMarkerId = ref('')
 
 const allowedExt = ['.pdf', '.docx', '.md', '.markdown', '.txt']
 
@@ -34,24 +43,141 @@ const canSend = computed(
   () => session.connected && !chat.sending && (draft.value.trim().length > 0 || files.value.length > 0),
 )
 
+const userMarkers = computed(() =>
+  chat.messages
+    .filter((item) => item.role === 'user')
+    .map((item) => ({
+      id: item.id,
+      preview: truncatePreview(item.text || (item.fileName ? `简历 · ${item.fileName}` : '（空消息）')),
+    })),
+)
+
+function truncatePreview(text: string, max = 42) {
+  const value = text.trim().replace(/\s+/g, ' ')
+  if (value.length <= max) return value
+  return `${value.slice(0, max)}…`
+}
+
+function distanceFromBottom(node: HTMLElement) {
+  return node.scrollHeight - node.scrollTop - node.clientHeight
+}
+
+function isNearBottom(node: HTMLElement) {
+  return distanceFromBottom(node) <= BOTTOM_GAP
+}
+
+function scrollToBottom(smooth = false) {
+  const node = scroller.value
+  if (!node) return
+  stickToBottom.value = true
+  showJumpBottom.value = false
+  scrollingProgrammatically = true
+  window.clearTimeout(jumpTimer)
+  if (smooth) {
+    node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' })
+    jumpTimer = window.setTimeout(() => {
+      scrollingProgrammatically = false
+      if (scroller.value && isNearBottom(scroller.value)) {
+        stickToBottom.value = true
+        showJumpBottom.value = false
+      }
+    }, 420)
+  } else {
+    node.scrollTop = node.scrollHeight
+    requestAnimationFrame(() => {
+      scrollingProgrammatically = false
+    })
+  }
+}
+
+function onTranscriptScroll() {
+  if (scrollingProgrammatically) return
+  const node = scroller.value
+  if (!node) return
+  if (isNearBottom(node)) {
+    stickToBottom.value = true
+    showJumpBottom.value = false
+  } else {
+    stickToBottom.value = false
+    showJumpBottom.value = true
+  }
+  updateActiveMarker()
+}
+
+function updateActiveMarker() {
+  const node = scroller.value
+  const markers = userMarkers.value
+  if (!node || !markers.length) {
+    activeMarkerId.value = ''
+    return
+  }
+  const top = node.scrollTop + 28
+  let current = markers[0]?.id || ''
+  for (const item of markers) {
+    const el = node.querySelector(`#msg-${CSS.escape(item.id)}`) as HTMLElement | null
+    if (!el) continue
+    if (el.offsetTop <= top) current = item.id
+    else break
+  }
+  activeMarkerId.value = current
+}
+
+function jumpToMessage(id: string) {
+  const node = scroller.value
+  const target = node?.querySelector(`#msg-${CSS.escape(id)}`) as HTMLElement | null
+  if (!node || !target) return
+  stickToBottom.value = false
+  showJumpBottom.value = true
+  activeMarkerId.value = id
+  scrollingProgrammatically = true
+  window.clearTimeout(jumpTimer)
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  jumpTimer = window.setTimeout(() => {
+    scrollingProgrammatically = false
+    onTranscriptScroll()
+  }, 420)
+}
+
 watch(
   () => {
     const last = chat.messages[chat.messages.length - 1]
-    return [chat.messages.length, last?.text, last?.questions?.length]
+    const report = last?.reports?.[last.reports.length - 1]
+    return [
+      chat.messages.length,
+      last?.text,
+      last?.reasoning,
+      last?.thinking?.length,
+      last?.questions?.length,
+      last?.reports?.length,
+      report?.text,
+      report?.reasoning,
+      report?.thinking?.length,
+      report?.questions?.length,
+      chat.sending,
+    ]
   },
   async () => {
+    if (!stickToBottom.value) {
+      await nextTick()
+      updateActiveMarker()
+      return
+    }
     await nextTick()
-    const node = scroller.value
-    if (node) node.scrollTop = node.scrollHeight
+    scrollToBottom()
+    updateActiveMarker()
   },
 )
 
 watch(
   () => chat.activeId,
   async () => {
+    stickToBottom.value = true
+    showJumpBottom.value = false
+    activeMarkerId.value = ''
+    hoveredMarkerId.value = ''
     await nextTick()
-    const node = scroller.value
-    if (node) node.scrollTop = node.scrollHeight
+    scrollToBottom()
+    updateActiveMarker()
   },
 )
 
@@ -193,6 +319,11 @@ function usePrompt(text: string) {
   if (text.includes('15 道题')) count.value = 15
 }
 
+function stopGeneration() {
+  if (!chat.sending || !activeAbort) return
+  activeAbort.abort()
+}
+
 function isScreenRequest(text: string) {
   return text.includes('可约面试') || text.includes('是否进入')
 }
@@ -209,6 +340,8 @@ function groupedQuestions(questions: Question[]) {
 async function send() {
   if (!canSend.value) return
   notice.value = ''
+  stickToBottom.value = true
+  showJumpBottom.value = false
   const text = draft.value.trim()
   const attachments = [...files.value]
   draft.value = ''
@@ -227,34 +360,53 @@ async function send() {
     questions: [],
     streaming: true,
   })
+  const controller = new AbortController()
+  activeAbort = controller
   chat.sending = true
   try {
     if (attachments.length && isScreenRequest(text)) {
-      await screenStream(attachments, assistant.id)
+      await screenStream(attachments, assistant.id, controller.signal)
     } else if (attachments.length) {
-      await recommendStream(attachments, assistant.id)
+      await recommendStream(attachments, assistant.id, controller.signal)
     } else {
-      await replyStream(text, assistant.id)
+      await replyStream(text, assistant.id, controller.signal)
     }
   } catch (error) {
-    patch(assistant.id, (message) => {
-      message.error = true
-      message.text = error instanceof Error ? error.message : '生成失败'
-      message.streaming = false
-    })
+    if (isAbortError(error)) {
+      patch(assistant.id, (message) => {
+        message.streaming = false
+        const hasContent =
+          Boolean(message.text.trim()) ||
+          Boolean(message.questions?.length) ||
+          Boolean(message.reports?.some((item) => item.text || item.questions.length || item.decision))
+        if (!hasContent) message.text = '已停止生成。'
+      })
+      notice.value = '已停止'
+    } else {
+      patch(assistant.id, (message) => {
+        message.error = true
+        message.text = error instanceof Error ? error.message : '生成失败'
+        message.streaming = false
+      })
+    }
   } finally {
+    activeAbort = null
     chat.sending = false
     chat.touchActive()
   }
 }
 
-async function screenStream(attachments: File[], messageId: string) {
+async function screenStream(attachments: File[], messageId: string, signal: AbortSignal) {
   const body = new FormData()
   for (const item of attachments) body.append('files', item)
-  const response = await fetch('/api/screen/stream', { method: 'POST', body })
-  await readSse(response, (event) => {
-    applyStreamEvent(messageId, event)
-  })
+  const response = await fetch('/api/screen/stream', { method: 'POST', body, signal })
+  await readSse(
+    response,
+    (event) => {
+      applyStreamEvent(messageId, event)
+    },
+    signal,
+  )
   patch(messageId, (message) => {
     message.streaming = false
   })
@@ -312,11 +464,11 @@ function applyStreamEvent(messageId: string, event: SseEvent, reportKey = '') {
   })
 }
 
-async function recommendStream(attachments: File[], messageId: string) {
+async function recommendStream(attachments: File[], messageId: string, signal: AbortSignal) {
   const body = new FormData()
   for (const item of attachments) body.append('files', item)
   body.append('count', String(count.value))
-  const response = await fetch('/api/recommend/stream', { method: 'POST', body })
+  const response = await fetch('/api/recommend/stream', { method: 'POST', body, signal })
   let activeKey = ''
   const typewriter = createTypewriter((chunk, key) => {
     patch(messageId, (message) => {
@@ -326,18 +478,22 @@ async function recommendStream(attachments: File[], messageId: string) {
     })
   })
   try {
-    await readSse(response, (event) => {
-      if (event.type === 'resume' && event.name) {
-        activeKey = `${event.index ?? 0}-${event.name}`
-        applyStreamEvent(messageId, event, activeKey)
-        return
-      }
-      if (event.type === 'token' && event.text) {
-        typewriter.push(event.text, activeKey || undefined)
-        return
-      }
-      applyStreamEvent(messageId, event)
-    })
+    await readSse(
+      response,
+      (event) => {
+        if (event.type === 'resume' && event.name) {
+          activeKey = `${event.index ?? 0}-${event.name}`
+          applyStreamEvent(messageId, event, activeKey)
+          return
+        }
+        if (event.type === 'token' && event.text) {
+          typewriter.push(event.text, activeKey || undefined)
+          return
+        }
+        applyStreamEvent(messageId, event)
+      },
+      signal,
+    )
     await typewriter.flush()
     patch(messageId, (message) => {
       message.streaming = false
@@ -351,7 +507,7 @@ async function recommendStream(attachments: File[], messageId: string) {
   }
 }
 
-async function replyStream(text: string, messageId: string) {
+async function replyStream(text: string, messageId: string, signal: AbortSignal) {
   const history = chat.messages
     .filter((item) => !item.error && item.id !== messageId)
     .map((item) => ({ role: item.role, content: messageText(item) }))
@@ -368,6 +524,7 @@ async function replyStream(text: string, messageId: string) {
       profile: profilePayload(),
       count: 5,
     }),
+    signal,
   })
   const typewriter = createTypewriter((chunk) => {
     patch(messageId, (message) => {
@@ -375,25 +532,29 @@ async function replyStream(text: string, messageId: string) {
     })
   })
   try {
-    await readSse(response, (event) => {
-      if (event.type === 'thinking' && event.text) {
-        patch(messageId, (message) => {
-          applyThinking(message, event)
-        })
-      } else if (event.type === 'question') {
-        patch(messageId, (message) => {
-          message.questions = [...(message.questions || []), event.question as Question]
-        })
-      } else if (event.type === 'decision' && event.decision) {
-        patch(messageId, (message) => {
-          message.decision = event.decision
-        })
-      } else if (event.type === 'token' && event.text) {
-        typewriter.push(event.text)
-      } else if (event.type === 'error') {
-        throw new Error(event.detail || '回复失败')
-      }
-    })
+    await readSse(
+      response,
+      (event) => {
+        if (event.type === 'thinking' && event.text) {
+          patch(messageId, (message) => {
+            applyThinking(message, event)
+          })
+        } else if (event.type === 'question') {
+          patch(messageId, (message) => {
+            message.questions = [...(message.questions || []), event.question as Question]
+          })
+        } else if (event.type === 'decision' && event.decision) {
+          patch(messageId, (message) => {
+            message.decision = event.decision
+          })
+        } else if (event.type === 'token' && event.text) {
+          typewriter.push(event.text)
+        } else if (event.type === 'error') {
+          throw new Error(event.detail || '回复失败')
+        }
+      },
+      signal,
+    )
     await typewriter.flush()
     patch(messageId, (message) => {
       message.streaming = false
@@ -457,229 +618,400 @@ function exportChat() {
 
 <template>
   <section
-    class="chat"
+    class="relative flex h-full min-h-0 flex-col px-6 py-2 pb-3.5 max-md:px-4 max-md:pb-3"
     @dragenter.prevent="onDragOver"
     @dragover.prevent="onDragOver"
     @dragleave.prevent="onDragLeave"
     @drop.prevent="onDrop"
   >
-    <div v-if="dragging" class="drop-mask">松开即可上传，支持多份简历</div>
-    <div class="toolbar">
-      <div class="actions">
-        <button type="button" class="ghost" :disabled="!chat.messages.length" @click="copyAll">
-          复制
-        </button>
-        <button type="button" class="ghost" :disabled="!chat.messages.length" @click="exportChat">
-          导出
-        </button>
+    <div
+      v-if="dragging"
+      class="pointer-events-none absolute inset-3 z-4 grid place-items-center rounded-2xl border-[1.5px] border-dashed border-accent bg-[color-mix(in_srgb,var(--accent)_12%,#fff)] text-[15px] [font-weight:650] text-accent"
+    >
+      松开即可上传，支持多份简历
+    </div>
+    <div class="flex min-h-7 flex-none items-center justify-end gap-3">
+      <div class="flex gap-2">
+        <IGButton :disabled="!chat.messages.length" @click="copyAll">复制</IGButton>
+        <IGButton :disabled="!chat.messages.length" @click="exportChat">导出</IGButton>
       </div>
-      <p v-if="notice" class="notice">{{ notice }}</p>
+      <p v-if="notice" class="m-0 text-[13px] text-accent">{{ notice }}</p>
     </div>
 
-    <div ref="scroller" class="transcript">
-      <div v-if="!chat.messages.length" class="empty">
-        <h2>从一份简历或一句追问起</h2>
-        <p>生成时展示思考过程，并以打字效果输出说明。</p>
-        <button
-          type="button"
-          class="empty-upload"
-          :disabled="!session.connected || chat.sending"
-          @click="pickFile"
-        >
-          选择简历文件
-        </button>
-        <p class="empty-hint">也可以把 PDF、DOCX、Markdown、TXT 拖到这里，一次多份。</p>
-        <p v-if="files.length" class="empty-file">
-          已选 {{ files.map((item) => item.name).join('、') }} · 题数 {{ count }}，在下方发送即可
-        </p>
-      </div>
-
-      <article
-        v-for="message in chat.messages"
-        :key="message.id"
-        class="bubble"
-        :data-role="message.role"
-        :data-error="message.error || undefined"
+    <div class="relative mt-2 flex min-h-0 flex-1 flex-row items-stretch gap-2">
+      <nav
+        v-if="userMarkers.length"
+        class="z-3 flex w-3.5 flex-none flex-col items-center gap-2.5 overflow-visible py-3.5 pb-6"
+        aria-label="问题定位"
       >
-        <div class="bubble-head">
-          <strong>{{ message.role === 'user' ? '你' : '助手' }}</strong>
-          <button type="button" class="ghost tiny" @click="copyText(messageText(message))">
-            复制
-          </button>
-        </div>
-
-        <p v-if="message.fileName" class="file">简历 · {{ message.fileName }}</p>
-
-        <template v-if="message.reports?.length">
-          <section v-for="report in message.reports" :key="report.key" class="resume-result">
-            <h2>{{ report.name }}</h2>
-            <details
-              v-if="report.reasoning || report.thinking.length"
-              class="thinking"
-              :open="message.streaming || undefined"
-            >
-              <summary>{{ message.streaming ? '正在思考…' : '思考过程' }}</summary>
-              <p v-if="report.reasoning" class="reason-stream">{{ report.reasoning }}</p>
-              <ol v-if="report.thinking.length">
-                <li v-for="(step, index) in report.thinking" :key="`${report.key}-think-${index}`">
-                  {{ step }}
-                </li>
-              </ol>
-            </details>
-            <p v-if="report.error" class="report-error">{{ report.error }}</p>
-            <div
-              v-if="report.text"
-              class="text md"
-              :data-streaming="message.streaming || undefined"
-              v-html="renderMarkdown(report.text)"
-            />
-            <div v-if="report.decision" class="decision" :data-ok="report.decision.recommend">
-              <h3>{{ report.decision.recommend ? '推荐面试' : '不推荐面试' }}</h3>
-              <ul>
-                <li
-                  v-for="(reason, index) in report.decision.reasons"
-                  :key="`${report.key}-reason-${index}`"
-                >
-                  {{ reason }}
-                </li>
-              </ul>
-            </div>
-            <div v-if="report.profile" class="profile">
-              <div>
-                <span>方向</span>
-                <strong>{{ label(report.profile.focus) }}</strong>
-              </div>
-              <div>
-                <span>年限</span>
-                <strong>{{ report.profile.years }}</strong>
-              </div>
-              <div class="wide">
-                <span>技能</span>
-                <strong>{{ report.profile.skills.join('、') || '未识别' }}</strong>
-              </div>
-              <div class="wide">
-                <span>摘要</span>
-                <strong>{{ report.profile.summary || '无' }}</strong>
-              </div>
-            </div>
-            <div v-if="report.questions.length" class="packs">
-              <section v-for="group in groupedQuestions(report.questions)" :key="group.stage">
-                <h3>{{ label(group.stage) }}</h3>
-                <article
-                  v-for="(item, index) in group.items"
-                  :key="`${report.key}-${item.id}`"
-                  class="q-card"
-                >
-                  <p class="q-title">
-                    <span>{{ index + 1 }}</span>
-                    {{ item.question }}
-                  </p>
-                  <p class="q-meta">
-                    {{ label(item.category) }} · {{ item.topic }} · {{ label(item.difficulty) }}
-                    <span v-if="item.source === 'web'" class="src">联网</span>
-                    <span v-else-if="item.source === 'probe'" class="src probe">追问</span>
-                    <span v-else-if="item.source === 'resume'" class="src resume">简历</span>
-                  </p>
-                  <p v-if="item.source === 'web' && item.source_url" class="q-source">
-                    来源
-                    <a :href="item.source_url" target="_blank" rel="noreferrer">{{
-                      item.source_title || item.source_url
-                    }}</a>
-                  </p>
-                  <p v-if="item.reason"><em>为什么问</em>{{ item.reason }}</p>
-                  <p><em>回答方向</em>{{ item.answer_direction }}</p>
-                  <p><em>参考答案</em>{{ item.reference_answer }}</p>
-                </article>
-              </section>
-            </div>
-          </section>
-        </template>
-
-        <template v-else>
-        <details
-          v-if="message.reasoning || message.thinking?.length"
-          class="thinking"
-          :open="message.streaming || undefined"
+        <button
+          v-for="(item, index) in userMarkers"
+          :key="item.id"
+          type="button"
+          class="group relative grid size-3.5 place-items-center border-0 bg-transparent p-0 cursor-pointer"
+          :data-on="activeMarkerId === item.id"
+          :aria-label="`第 ${index + 1} 条问题`"
+          @click="jumpToMessage(item.id)"
+          @mouseenter="hoveredMarkerId = item.id"
+          @mouseleave="hoveredMarkerId = ''"
+          @focus="hoveredMarkerId = item.id"
+          @blur="hoveredMarkerId = ''"
         >
-          <summary>{{ message.streaming ? '正在思考…' : '思考过程' }}</summary>
-          <p v-if="message.reasoning" class="reason-stream">{{ message.reasoning }}</p>
-          <ol v-if="message.thinking?.length">
-            <li v-for="(step, index) in message.thinking" :key="`${message.id}-${index}`">
-              {{ step }}
-            </li>
-          </ol>
-        </details>
-
+          <span
+            class="block size-2 rounded-sm bg-[rgba(18,32,46,0.22)] transition-[transform,background,box-shadow] duration-160 ease-in-out group-hover:bg-[rgba(18,32,46,0.38)] group-focus-visible:bg-[rgba(18,32,46,0.38)] group-data-[on=true]:scale-150 group-data-[on=true]:bg-accent group-data-[on=true]:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent)]"
+          />
+          <span
+            v-if="hoveredMarkerId === item.id"
+            class="pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-5 w-max max-w-[min(240px,42vw)] -translate-y-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg bg-ink px-2.5 py-1.5 text-xs leading-[1.4] text-[#f4faf8] shadow-preview"
+          >{{ item.preview }}</span>
+        </button>
+      </nav>
+      <div class="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <div
-          v-if="message.role === 'assistant' && message.text"
-          class="text md"
-          :data-streaming="message.streaming || undefined"
-          v-html="renderMarkdown(message.text)"
-        />
-        <p v-else-if="message.text" class="text" :data-streaming="message.streaming || undefined">
-          {{ message.text }}
-        </p>
+          ref="scroller"
+          class="scroll-thin min-h-0 flex-1 overflow-auto px-3 pt-2 pb-5"
+          @scroll="onTranscriptScroll"
+        >
+          <div
+            v-if="!chat.messages.length"
+            class="animate-rise mx-auto grid min-h-full max-w-[420px] place-content-center justify-items-center text-center"
+          >
+            <h2 class="m-0 font-display text-2xl">从一份简历或一句追问起</h2>
+            <p class="mt-2 mb-0 text-sm text-muted">生成时展示思考过程，并以打字效果输出说明。</p>
+            <IGButton
+              variant="accent"
+              class="mt-3 [font-weight:650]"
+              :disabled="!session.connected || chat.sending"
+              @click="pickFile"
+            >
+              选择简历文件
+            </IGButton>
+            <p class="mt-2.5 mb-0 text-sm text-muted">也可以把 PDF、DOCX、Markdown、TXT 拖到这里，一次多份。</p>
+            <p v-if="files.length" class="mt-2.5 mb-0 text-sm font-semibold text-accent">
+              已选 {{ files.map((item) => item.name).join('、') }} · 题数 {{ count }}，在下方发送即可
+            </p>
+          </div>
 
-        <div v-if="message.decision" class="decision" :data-ok="message.decision.recommend">
-          <h3>{{ message.decision.recommend ? '推荐面试' : '不推荐面试' }}</h3>
-          <ul>
-            <li v-for="(reason, index) in message.decision.reasons" :key="`${message.id}-reason-${index}`">
-              {{ reason }}
-            </li>
-          </ul>
-        </div>
+          <article
+            v-for="message in chat.messages"
+            :id="message.role === 'user' ? `msg-${message.id}` : undefined"
+            :key="message.id"
+            class="animate-rise bubble-card box-border mb-4 w-[92%] max-w-none px-[22px] py-[18px] data-[role=user]:ml-auto data-[role=user]:scroll-mt-3 data-[role=user]:bg-bubble-user data-[role=assistant]:mr-auto data-[error=true]:border-[#ffd1cc] data-[error=true]:bg-[#fff1f0]"
+            :data-role="message.role"
+            :data-error="message.error || undefined"
+          >
+            <div class="mb-2 flex items-center justify-between">
+              <strong>{{ message.role === 'user' ? '你' : '助手' }}</strong>
+              <IGButton size="sm" class="rounded-xl px-2 py-1" @click="copyText(messageText(message))">
+                复制
+              </IGButton>
+            </div>
 
-        <div v-if="message.profile" class="profile">
-          <div>
-            <span>方向</span>
-            <strong>{{ label(message.profile.focus) }}</strong>
-          </div>
-          <div>
-            <span>年限</span>
-            <strong>{{ message.profile.years }}</strong>
-          </div>
-          <div class="wide">
-            <span>技能</span>
-            <strong>{{ message.profile.skills.join('、') || '未识别' }}</strong>
-          </div>
-          <div class="wide">
-            <span>摘要</span>
-            <strong>{{ message.profile.summary || '无' }}</strong>
-          </div>
-        </div>
+            <p v-if="message.fileName" class="mb-2 mt-0 text-sm font-semibold text-accent">
+              简历 · {{ message.fileName }}
+            </p>
 
-        <div v-if="message.questions?.length" class="packs">
-          <section v-for="group in groupedQuestions(message.questions)" :key="group.stage">
-            <h3>{{ label(group.stage) }}</h3>
-            <article v-for="(item, index) in group.items" :key="item.id" class="q-card">
-              <p class="q-title">
-                <span>{{ index + 1 }}</span>
-                {{ item.question }}
+            <template v-if="message.reports?.length">
+              <section
+                v-for="report in message.reports"
+                :key="report.key"
+                class="mt-2 grid gap-3 border-t border-line/10 pt-3"
+              >
+                <h2 class="m-0 text-[15px]">{{ report.name }}</h2>
+                <details
+                  v-if="report.reasoning || report.thinking.length"
+                  class="mb-0 rounded-xl bg-[rgba(18,32,46,0.04)] px-3 py-2.5"
+                  :open="message.streaming || undefined"
+                >
+                  <summary class="cursor-pointer [font-weight:650] text-muted">
+                    {{ message.streaming ? '正在思考…' : '思考过程' }}
+                  </summary>
+                  <p
+                    v-if="report.reasoning"
+                    class="mt-2.5 mb-0 whitespace-pre-wrap text-sm leading-[1.65] text-muted"
+                  >
+                    {{ report.reasoning }}
+                  </p>
+                  <ol v-if="report.thinking.length" class="mt-2.5 mb-0 pl-[18px] text-sm text-muted">
+                    <li
+                      v-for="(step, index) in report.thinking"
+                      :key="`${report.key}-think-${index}`"
+                      class="mt-0 [&+&]:mt-1"
+                    >
+                      {{ step }}
+                    </li>
+                  </ol>
+                </details>
+                <p v-if="report.error" class="m-0 text-[#9f1239]">{{ report.error }}</p>
+                <div
+                  v-if="report.text"
+                  class="md m-0 data-[streaming=true]:min-h-[1.5em]"
+                  :data-streaming="message.streaming || undefined"
+                  v-html="renderMarkdown(report.text)"
+                />
+                <div
+                  v-if="report.decision"
+                  class="mt-3 rounded-[14px] border border-[#ffd1cc] bg-[#fff6f5] px-4 py-3.5 data-[ok=true]:border-[rgba(11,122,106,0.28)] data-[ok=true]:bg-[#f3fbf8]"
+                  :data-ok="report.decision.recommend"
+                >
+                  <h3 class="mb-2 mt-0 font-display text-[22px]">
+                    {{ report.decision.recommend ? '推荐面试' : '不推荐面试' }}
+                  </h3>
+                  <ul class="m-0 pl-[1.2em]">
+                    <li
+                      v-for="(reason, index) in report.decision.reasons"
+                      :key="`${report.key}-reason-${index}`"
+                      class="mt-0 [&+&]:mt-1.5"
+                    >
+                      {{ reason }}
+                    </li>
+                  </ul>
+                </div>
+                <div
+                  v-if="report.profile"
+                  class="mt-3.5 grid grid-cols-2 gap-2.5 max-md:grid-cols-1"
+                >
+                  <div class="rounded-xl profile-cell px-3 py-2.5">
+                    <span class="block text-xs text-muted">方向</span>
+                    <strong class="mt-1 block [font-weight:650]">{{ label(report.profile.focus) }}</strong>
+                  </div>
+                  <div class="rounded-xl profile-cell px-3 py-2.5">
+                    <span class="block text-xs text-muted">年限</span>
+                    <strong class="mt-1 block [font-weight:650]">{{ report.profile.years }}</strong>
+                  </div>
+                  <div class="col-span-full rounded-xl profile-cell px-3 py-2.5">
+                    <span class="block text-xs text-muted">技能</span>
+                    <strong class="mt-1 block [font-weight:650]">{{
+                      report.profile.skills.join('、') || '未识别'
+                    }}</strong>
+                  </div>
+                  <div class="col-span-full rounded-xl profile-cell px-3 py-2.5">
+                    <span class="block text-xs text-muted">摘要</span>
+                    <strong class="mt-1 block [font-weight:650]">{{ report.profile.summary || '无' }}</strong>
+                  </div>
+                </div>
+                <div v-if="report.questions.length" class="mt-[18px] grid gap-[18px]">
+                  <section v-for="group in groupedQuestions(report.questions)" :key="group.stage">
+                    <h3 class="mb-2.5 mt-0 font-display text-[22px]">{{ label(group.stage) }}</h3>
+                    <article
+                      v-for="(item, index) in group.items"
+                      :key="`${report.key}-${item.id}`"
+                      class="animate-rise mt-0 rounded-[14px] border border-line/10 bg-panel-strong p-3.5 [&+&]:mt-2.5"
+                    >
+                      <p class="m-0 flex gap-2.5 font-bold leading-[1.45]">
+                        <span
+                          class="inline-grid size-6 flex-none place-items-center rounded-full bg-accent-soft text-xs text-accent"
+                          >{{ index + 1 }}</span
+                        >
+                        {{ item.question }}
+                      </p>
+                      <p class="mb-2.5 mt-1.5 text-[13px] text-muted">
+                        {{ label(item.category) }} · {{ item.topic }} · {{ label(item.difficulty) }}
+                        <span
+                          v-if="item.source === 'web'"
+                          class="ml-2 inline-block rounded-full bg-[#e8eef8] px-2 py-px text-xs font-bold text-[#2f5f9e]"
+                          >联网</span
+                        >
+                        <span
+                          v-else-if="item.source === 'probe'"
+                          class="ml-2 inline-block rounded-full bg-[#f3e8f8] px-2 py-px text-xs font-bold text-[#6b3d8f]"
+                          >追问</span
+                        >
+                        <span
+                          v-else-if="item.source === 'resume'"
+                          class="ml-2 inline-block rounded-full bg-accent-soft px-2 py-px text-xs font-bold text-accent"
+                          >简历</span
+                        >
+                      </p>
+                      <p
+                        v-if="item.source === 'web' && item.source_url"
+                        class="-mt-1 mb-2.5 text-[13px] text-muted"
+                      >
+                        来源
+                        <a
+                          class="text-accent no-underline hover:underline"
+                          :href="item.source_url"
+                          target="_blank"
+                          rel="noreferrer"
+                          >{{ item.source_title || item.source_url }}</a
+                        >
+                      </p>
+                      <p v-if="item.reason" class="m-0 leading-[1.65] [&+p]:mt-2">
+                        <em class="pill-em">为什么问</em>{{ item.reason }}
+                      </p>
+                      <p class="m-0 leading-[1.65] [&+p]:mt-2">
+                        <em class="pill-em">回答方向</em>{{ item.answer_direction }}
+                      </p>
+                      <p class="m-0 leading-[1.65] [&+p]:mt-2">
+                        <em class="pill-em">参考答案</em>{{ item.reference_answer }}
+                      </p>
+                    </article>
+                  </section>
+                </div>
+              </section>
+            </template>
+
+            <template v-else>
+              <details
+                v-if="message.reasoning || message.thinking?.length"
+                class="mb-3 rounded-xl bg-[rgba(18,32,46,0.04)] px-3 py-2.5"
+                :open="message.streaming || undefined"
+              >
+                <summary class="cursor-pointer [font-weight:650] text-muted">
+                  {{ message.streaming ? '正在思考…' : '思考过程' }}
+                </summary>
+                <p
+                  v-if="message.reasoning"
+                  class="mt-2.5 mb-0 whitespace-pre-wrap text-sm leading-[1.65] text-muted"
+                >
+                  {{ message.reasoning }}
+                </p>
+                <ol v-if="message.thinking?.length" class="mt-2.5 mb-0 pl-[18px] text-sm text-muted">
+                  <li
+                    v-for="(step, index) in message.thinking"
+                    :key="`${message.id}-${index}`"
+                    class="mt-0 [&+&]:mt-1"
+                  >
+                    {{ step }}
+                  </li>
+                </ol>
+              </details>
+
+              <div
+                v-if="message.role === 'assistant' && message.text"
+                class="md m-0 data-[streaming=true]:min-h-[1.5em]"
+                :data-streaming="message.streaming || undefined"
+                v-html="renderMarkdown(message.text)"
+              />
+              <p
+                v-else-if="message.text"
+                class="m-0 whitespace-pre-wrap data-[streaming=true]:min-h-[1.5em]"
+                :data-streaming="message.streaming || undefined"
+              >
+                {{ message.text }}
               </p>
-              <p class="q-meta">
-                {{ label(item.category) }} · {{ item.topic }} · {{ label(item.difficulty) }}
-                <span v-if="item.source === 'web'" class="src">联网</span>
-                <span v-else-if="item.source === 'probe'" class="src probe">追问</span>
-                <span v-else-if="item.source === 'resume'" class="src resume">简历</span>
-              </p>
-              <p v-if="item.source === 'web' && item.source_url" class="q-source">
-                来源
-                <a :href="item.source_url" target="_blank" rel="noreferrer">{{
-                  item.source_title || item.source_url
-                }}</a>
-              </p>
-              <p v-if="item.reason"><em>为什么问</em>{{ item.reason }}</p>
-              <p><em>回答方向</em>{{ item.answer_direction }}</p>
-              <p><em>参考答案</em>{{ item.reference_answer }}</p>
-            </article>
-          </section>
+
+              <div
+                v-if="message.decision"
+                class="mt-3 rounded-[14px] border border-[#ffd1cc] bg-[#fff6f5] px-4 py-3.5 data-[ok=true]:border-[rgba(11,122,106,0.28)] data-[ok=true]:bg-[#f3fbf8]"
+                :data-ok="message.decision.recommend"
+              >
+                <h3 class="mb-2 mt-0 font-display text-[22px]">
+                  {{ message.decision.recommend ? '推荐面试' : '不推荐面试' }}
+                </h3>
+                <ul class="m-0 pl-[1.2em]">
+                  <li
+                    v-for="(reason, index) in message.decision.reasons"
+                    :key="`${message.id}-reason-${index}`"
+                    class="mt-0 [&+&]:mt-1.5"
+                  >
+                    {{ reason }}
+                  </li>
+                </ul>
+              </div>
+
+              <div
+                v-if="message.profile"
+                class="mt-3.5 grid grid-cols-2 gap-2.5 max-md:grid-cols-1"
+              >
+                <div class="rounded-xl profile-cell px-3 py-2.5">
+                  <span class="block text-xs text-muted">方向</span>
+                  <strong class="mt-1 block [font-weight:650]">{{ label(message.profile.focus) }}</strong>
+                </div>
+                <div class="rounded-xl profile-cell px-3 py-2.5">
+                  <span class="block text-xs text-muted">年限</span>
+                  <strong class="mt-1 block [font-weight:650]">{{ message.profile.years }}</strong>
+                </div>
+                <div class="col-span-full rounded-xl profile-cell px-3 py-2.5">
+                  <span class="block text-xs text-muted">技能</span>
+                  <strong class="mt-1 block [font-weight:650]">{{
+                    message.profile.skills.join('、') || '未识别'
+                  }}</strong>
+                </div>
+                <div class="col-span-full rounded-xl profile-cell px-3 py-2.5">
+                  <span class="block text-xs text-muted">摘要</span>
+                  <strong class="mt-1 block [font-weight:650]">{{ message.profile.summary || '无' }}</strong>
+                </div>
+              </div>
+
+              <div v-if="message.questions?.length" class="mt-[18px] grid gap-[18px]">
+                <section v-for="group in groupedQuestions(message.questions)" :key="group.stage">
+                  <h3 class="mb-2.5 mt-0 font-display text-[22px]">{{ label(group.stage) }}</h3>
+                  <article
+                    v-for="(item, index) in group.items"
+                    :key="item.id"
+                    class="animate-rise mt-0 rounded-[14px] border border-line/10 bg-panel-strong p-3.5 [&+&]:mt-2.5"
+                  >
+                    <p class="m-0 flex gap-2.5 font-bold leading-[1.45]">
+                      <span
+                        class="inline-grid size-6 flex-none place-items-center rounded-full bg-accent-soft text-xs text-accent"
+                        >{{ index + 1 }}</span
+                      >
+                      {{ item.question }}
+                    </p>
+                    <p class="mb-2.5 mt-1.5 text-[13px] text-muted">
+                      {{ label(item.category) }} · {{ item.topic }} · {{ label(item.difficulty) }}
+                      <span
+                        v-if="item.source === 'web'"
+                        class="ml-2 inline-block rounded-full bg-[#e8eef8] px-2 py-px text-xs font-bold text-[#2f5f9e]"
+                        >联网</span
+                      >
+                      <span
+                        v-else-if="item.source === 'probe'"
+                        class="ml-2 inline-block rounded-full bg-[#f3e8f8] px-2 py-px text-xs font-bold text-[#6b3d8f]"
+                        >追问</span
+                      >
+                      <span
+                        v-else-if="item.source === 'resume'"
+                        class="ml-2 inline-block rounded-full bg-accent-soft px-2 py-px text-xs font-bold text-accent"
+                        >简历</span
+                      >
+                    </p>
+                    <p
+                      v-if="item.source === 'web' && item.source_url"
+                      class="-mt-1 mb-2.5 text-[13px] text-muted"
+                    >
+                      来源
+                      <a
+                        class="text-accent no-underline hover:underline"
+                        :href="item.source_url"
+                        target="_blank"
+                        rel="noreferrer"
+                        >{{ item.source_title || item.source_url }}</a
+                      >
+                    </p>
+                    <p v-if="item.reason" class="m-0 leading-[1.65] [&+p]:mt-2">
+                      <em class="pill-em">为什么问</em>{{ item.reason }}
+                    </p>
+                    <p class="m-0 leading-[1.65] [&+p]:mt-2">
+                      <em class="pill-em">回答方向</em>{{ item.answer_direction }}
+                    </p>
+                    <p class="m-0 leading-[1.65] [&+p]:mt-2">
+                      <em class="pill-em">参考答案</em>{{ item.reference_answer }}
+                    </p>
+                  </article>
+                </section>
+              </div>
+            </template>
+            <span
+              v-if="message.streaming"
+              class="animate-blink ml-0.5 inline-block h-[1em] w-[0.55ch] align-[-0.1em] bg-accent"
+            />
+          </article>
         </div>
-        </template>
-        <span v-if="message.streaming" class="caret" />
-      </article>
+        <button
+          v-if="showJumpBottom"
+          type="button"
+          class="absolute bottom-3 right-4 z-2 size-9 rounded-full border border-line/10 bg-panel-strong text-base leading-none text-ink shadow-jump hover:border-transparent hover:bg-accent-soft hover:text-accent"
+          aria-label="回到底部"
+          @click="scrollToBottom(true)"
+        >
+          ↓
+        </button>
+      </div>
     </div>
 
-    <form class="composer" @submit.prevent>
+    <form class="mt-2.5 flex-none border-t border-line/10 pt-2.5" @submit.prevent>
       <input
         ref="fileInput"
         class="sr-only"
@@ -690,23 +1022,36 @@ function exportChat() {
         @change="onFileChange"
       />
 
-      <div v-if="files.length" class="attach-bar">
-        <div v-for="(item, index) in files" :key="`${item.name}-${item.size}`" class="attach-chip">
-          <span class="attach-name">{{ item.name }}</span>
-          <button type="button" class="ghost tiny" @click="removeFile(index)">移除</button>
+      <div v-if="files.length" class="mb-2.5 flex flex-wrap items-center gap-2">
+        <div
+          v-for="(item, index) in files"
+          :key="`${item.name}-${item.size}`"
+          class="inline-flex max-w-full items-center gap-2 rounded-full bg-accent-soft py-1.5 pl-3 pr-2 text-[13px] font-semibold text-accent"
+        >
+          <span class="max-w-[220px] overflow-hidden text-ellipsis whitespace-nowrap">{{
+            item.name
+          }}</span>
+          <IGButton size="sm" class="rounded-xl px-2 py-1" @click="removeFile(index)">移除</IGButton>
         </div>
-        <label class="attach-count">
+        <label class="inline-flex items-center gap-1.5 font-medium text-muted">
           题数
-          <input v-model.number="count" type="number" min="10" max="20" :disabled="chat.sending" />
+          <input
+            v-model.number="count"
+            class="w-14 rounded-lg border border-line/10 bg-white px-1.5 py-0.5 text-ink"
+            type="number"
+            min="10"
+            max="20"
+            :disabled="chat.sending"
+          />
         </label>
       </div>
 
-      <div class="prompts">
+      <div class="mb-2.5 flex flex-wrap gap-2">
         <button
           v-for="item in prompts"
           :key="item"
           type="button"
-          class="prompt"
+          class="rounded-full border border-line/10 bg-white/90 px-3 py-1.5 text-left text-[13px] text-muted hover:border-[rgba(11,122,106,0.35)] hover:bg-accent-soft hover:text-accent"
           :disabled="!session.connected || chat.sending"
           @click="usePrompt(item)"
         >
@@ -716,15 +1061,16 @@ function exportChat() {
       <div class="composer-box">
         <textarea
           v-model="draft"
+          class="min-h-14 w-full resize-y border-0 bg-transparent px-1 pt-1 outline-none"
           rows="2"
           placeholder="追问某一道：先说回答方向，再给参考答案。Enter 发送，Shift+Enter 换行。"
           :disabled="!session.connected || chat.sending"
           @keydown="onComposerKeydown"
         />
-        <div class="composer-foot">
+        <div class="flex items-center justify-between gap-2.5">
           <button
             type="button"
-            class="attach-btn"
+            class="inline-flex items-center gap-1.5 rounded-xl border border-line/10 bg-transparent px-3 py-2 text-muted hover:border-[rgba(11,122,106,0.35)] hover:bg-accent-soft hover:text-accent"
             :disabled="!session.connected || chat.sending"
             title="上传简历"
             @click="pickFile"
@@ -737,618 +1083,19 @@ function exportChat() {
             </svg>
             简历
           </button>
-          <button type="button" class="send" :disabled="!canSend" @click="send">
-            {{ chat.sending ? '生成中' : '发送' }}
-          </button>
+          <IGButton
+            v-if="chat.sending"
+            variant="danger"
+            class="min-w-[84px]"
+            @click="stopGeneration"
+          >
+            停止
+          </IGButton>
+          <IGButton v-else variant="accent" class="min-w-[84px]" :disabled="!canSend" @click="send">
+            发送
+          </IGButton>
         </div>
       </div>
     </form>
   </section>
 </template>
-
-<style scoped>
-.chat {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  padding: 8px 24px 14px;
-}
-
-.drop-mask {
-  position: absolute;
-  inset: 12px;
-  z-index: 4;
-  display: grid;
-  place-items: center;
-  border: 1.5px dashed var(--accent);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--accent) 12%, #fff);
-  color: var(--accent);
-  font-size: 15px;
-  font-weight: 650;
-  pointer-events: none;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  flex: none;
-  min-height: 28px;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
-.ghost,
-.send,
-.attach-btn,
-.empty-upload {
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--panel-strong);
-  padding: 8px 12px;
-}
-
-.ghost.tiny {
-  padding: 4px 8px;
-  font-size: 13px;
-}
-
-.send {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  min-width: 84px;
-}
-
-.notice {
-  margin: 0;
-  color: var(--accent);
-  font-size: 13px;
-}
-
-.transcript {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  margin-top: 8px;
-  padding-right: 4px;
-}
-
-.empty {
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  min-height: 100%;
-  max-width: 420px;
-  margin: 0 auto;
-  text-align: center;
-  animation: rise 500ms ease both;
-}
-
-.empty h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 24px;
-}
-
-.empty p {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.empty-upload {
-  margin-top: 12px;
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 650;
-}
-
-.empty-hint {
-  margin-top: 10px !important;
-}
-
-.empty-file {
-  margin-top: 10px !important;
-  color: var(--accent) !important;
-  font-weight: 600;
-}
-
-.bubble {
-  box-sizing: border-box;
-  width: 92%;
-  max-width: none;
-  margin: 0 0 16px;
-  padding: 18px 22px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
-  backdrop-filter: blur(10px);
-  box-shadow: var(--shadow);
-  animation: rise 320ms ease both;
-}
-
-.bubble[data-role='user'] {
-  margin-left: auto;
-  background: linear-gradient(180deg, #e7f7f2, #dff3ec);
-}
-
-.bubble[data-role='assistant'] {
-  margin-right: auto;
-}
-
-.bubble[data-error='true'] {
-  background: #fff1f0;
-  border-color: #ffd1cc;
-}
-
-.bubble-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.file {
-  margin: 0 0 8px;
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.thinking {
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(18, 32, 46, 0.04);
-}
-
-.thinking summary {
-  cursor: pointer;
-  font-weight: 650;
-  color: var(--muted);
-}
-
-.thinking ol {
-  margin: 10px 0 0;
-  padding-left: 18px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.reason-stream {
-  margin: 10px 0 0;
-  white-space: pre-wrap;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.65;
-}
-
-.thinking li + li {
-  margin-top: 4px;
-}
-
-.text {
-  margin: 0;
-  white-space: pre-wrap;
-}
-
-.text.md {
-  white-space: normal;
-}
-
-.text.md :deep(p) {
-  margin: 0 0 0.75em;
-}
-
-.text.md :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
-.text.md :deep(ul),
-.text.md :deep(ol) {
-  margin: 0.4em 0 0.75em;
-  padding-left: 1.35em;
-}
-
-.text.md :deep(li + li) {
-  margin-top: 0.25em;
-}
-
-.text.md :deep(strong) {
-  font-weight: 700;
-}
-
-.text.md :deep(code) {
-  padding: 0.1em 0.35em;
-  border-radius: 6px;
-  background: rgba(18, 32, 46, 0.06);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.92em;
-}
-
-.text.md :deep(pre) {
-  overflow: auto;
-  margin: 0.6em 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(18, 32, 46, 0.06);
-}
-
-.text.md :deep(pre code) {
-  padding: 0;
-  background: transparent;
-}
-
-.text.md :deep(h1),
-.text.md :deep(h2),
-.text.md :deep(h3) {
-  margin: 0.9em 0 0.4em;
-  font-family: var(--font-display);
-  line-height: 1.25;
-}
-
-.text.md :deep(h1:first-child),
-.text.md :deep(h2:first-child),
-.text.md :deep(h3:first-child) {
-  margin-top: 0;
-}
-
-.text[data-streaming='true'] {
-  min-height: 1.5em;
-}
-
-.caret {
-  display: inline-block;
-  width: 0.55ch;
-  height: 1em;
-  margin-left: 2px;
-  background: var(--accent);
-  vertical-align: -0.1em;
-  animation: blink 1s steps(1) infinite;
-}
-
-.profile {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.profile div {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.7);
-}
-
-.profile .wide {
-  grid-column: 1 / -1;
-}
-
-.profile span {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.profile strong {
-  display: block;
-  margin-top: 4px;
-  font-weight: 650;
-}
-
-.packs {
-  display: grid;
-  gap: 18px;
-  margin-top: 18px;
-}
-
-.resume-result {
-  display: grid;
-  gap: 12px;
-  margin-top: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line, #e7e5e4);
-}
-
-.resume-result h2 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.report-error {
-  margin: 0;
-  color: #9f1239;
-}
-
-.packs h3 {
-  margin: 0 0 10px;
-  font-family: var(--font-display);
-  font-size: 22px;
-}
-
-.q-card {
-  padding: 14px;
-  border-radius: 14px;
-  background: var(--panel-strong);
-  border: 1px solid var(--line);
-  animation: rise 280ms ease both;
-}
-
-.q-card + .q-card {
-  margin-top: 10px;
-}
-
-.q-title {
-  display: flex;
-  gap: 10px;
-  margin: 0;
-  font-weight: 700;
-  line-height: 1.45;
-}
-
-.q-title span {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 12px;
-  flex: none;
-}
-
-.q-meta {
-  margin: 6px 0 10px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.q-meta .src {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: #e8eef8;
-  color: #2f5f9e;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.q-meta .src.probe {
-  background: #f3e8f8;
-  color: #6b3d8f;
-}
-
-.q-meta .src.resume {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.q-source {
-  margin: -4px 0 10px !important;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.q-source a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.q-source a:hover {
-  text-decoration: underline;
-}
-
-.q-card p {
-  margin: 0;
-  line-height: 1.65;
-}
-
-.q-card p + p {
-  margin-top: 8px;
-}
-
-.q-card em {
-  display: inline-block;
-  margin-right: 8px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-style: normal;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.composer {
-  flex: none;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0;
-}
-
-.attach-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.attach-chip {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  max-width: 100%;
-  padding: 6px 8px 6px 12px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.attach-name {
-  overflow: hidden;
-  max-width: 220px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.attach-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.attach-count input {
-  width: 56px;
-  padding: 2px 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--ink);
-}
-
-.prompts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.prompt {
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.8);
-  padding: 6px 12px;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: left;
-}
-
-.prompt:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: rgba(11, 122, 106, 0.35);
-  background: var(--accent-soft);
-}
-
-.decision {
-  margin-top: 12px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid #ffd1cc;
-  background: #fff6f5;
-}
-
-.decision[data-ok='true'] {
-  border-color: rgba(11, 122, 106, 0.28);
-  background: #f3fbf8;
-}
-
-.decision h3 {
-  margin: 0 0 8px;
-  font-family: var(--font-display);
-  font-size: 22px;
-}
-
-.decision ul {
-  margin: 0;
-  padding-left: 1.2em;
-}
-
-.decision li + li {
-  margin-top: 6px;
-}
-
-.composer-box {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: var(--shadow);
-}
-
-.composer-box textarea {
-  width: 100%;
-  resize: vertical;
-  min-height: 56px;
-  padding: 4px 4px 0;
-  border: 0;
-  background: transparent;
-  outline: none;
-}
-
-.composer-foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-}
-
-.attach-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  background: transparent;
-}
-
-.attach-btn:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: rgba(11, 122, 106, 0.35);
-  background: var(--accent-soft);
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-@media (max-width: 860px) {
-  .chat {
-    padding: 8px 16px 12px;
-  }
-
-  .profile {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

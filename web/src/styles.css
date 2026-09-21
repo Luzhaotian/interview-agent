@@ -53,3 +53,143 @@ button:disabled {
 a {
   color: inherit;
 }
+
+/* Vue Transition：抽屉开关 */
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+  transition: opacity 220ms ease;
+}
+
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+  opacity: 0;
+}
+
+.drawer-slide-enter-active,
+.drawer-slide-leave-active {
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.drawer-slide-enter-from,
+.drawer-slide-leave-to {
+  transform: translateX(100%);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-rise {
+  animation: rise 500ms ease both;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.animate-blink {
+  animation: blink 1s steps(1) infinite;
+}
+
+/* v-html Markdown，无法挂 class */
+.md {
+  line-height: 1.65;
+}
+
+.md :where(p, ul, ol, pre, blockquote) {
+  margin: 0.55em 0;
+}
+
+.md :where(ul, ol) {
+  padding-left: 1.2em;
+}
+
+.md :where(h1, h2, h3, h4) {
+  margin: 0.8em 0 0.35em;
+  font-family: var(--font-display);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.md :where(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: rgba(18, 32, 46, 0.06);
+}
+
+.md :where(pre) {
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(18, 32, 46, 0.05);
+}
+
+.md :where(pre code) {
+  padding: 0;
+  background: transparent;
+}
+
+.md :where(a) {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 细滚动条：WebKit + Firefox */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(18, 32, 46, 0.22) transparent;
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(18, 32, 46, 0.18);
+}
+
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(18, 32, 46, 0.32);
+}
+
+/* 深色侧栏内滚动条 */
+.scroll-thin-on-dark {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(244, 250, 248, 0.28) transparent;
+}
+
+.scroll-thin-on-dark::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scroll-thin-on-dark::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-thin-on-dark::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(244, 250, 248, 0.22);
+}
+
+.scroll-thin-on-dark::-webkit-scrollbar-thumb:hover {
+  background: rgba(244, 250, 248, 0.38);
+}

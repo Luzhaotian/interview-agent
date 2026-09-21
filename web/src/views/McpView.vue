@@ -51,59 +51,61 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page" :data-embedded="embedded || undefined">
+  <section :class="embedded ? 'page-embedded scroll-thin' : 'page-shell scroll-thin'">
     <header v-if="!embedded">
       <p class="eyebrow">Protocol</p>
-      <h1>MCP</h1>
-      <p>当前注册给 Cursor 的本地接口。页面只读，不在浏览器里调用这些工具。</p>
+      <h1 class="mt-1.5 mb-0 font-display text-[clamp(32px,4vw,44px)] tracking-[-0.03em]">MCP</h1>
+      <p class="text-muted">当前注册给 Cursor 的本地接口。页面只读，不在浏览器里调用这些工具。</p>
     </header>
-    <p v-else class="embedded-lead">
+    <p v-else class="m-0 text-muted">
       推荐流程在知识库缺口时会自动调用联网查题；本页只展示接口说明，不在浏览器里直接搜。
     </p>
 
     <p v-if="loading">正在读取接口…</p>
-    <p v-else-if="errorText" class="error">{{ errorText }}</p>
+    <p v-else-if="errorText" class="text-warn">{{ errorText }}</p>
     <template v-else-if="server">
-      <section class="card">
-        <h2>{{ server.name }}</h2>
-        <p>{{ server.summary }}</p>
-        <dl>
-          <div>
-            <dt>传输</dt>
-            <dd>{{ server.transport }}</dd>
+      <section class="panel-card mt-[18px] max-w-[760px] px-5 py-[18px]">
+        <h2 class="m-0 font-display text-2xl">{{ server.name }}</h2>
+        <p class="text-muted">{{ server.summary }}</p>
+        <dl class="mt-3 mb-0 grid gap-2">
+          <div class="grid grid-cols-[52px_1fr] gap-2">
+            <dt class="text-muted">传输</dt>
+            <dd class="m-0">{{ server.transport }}</dd>
           </div>
-          <div>
-            <dt>配置</dt>
-            <dd>{{ server.config }}</dd>
+          <div class="grid grid-cols-[52px_1fr] gap-2">
+            <dt class="text-muted">配置</dt>
+            <dd class="m-0">{{ server.config }}</dd>
           </div>
-          <div>
-            <dt>启动</dt>
-            <dd>
-              <code>{{ server.command }}</code>
+          <div class="grid grid-cols-[52px_1fr] gap-2">
+            <dt class="text-muted">启动</dt>
+            <dd class="m-0">
+              <code class="font-mono text-[13px]">{{ server.command }}</code>
             </dd>
           </div>
         </dl>
       </section>
 
-      <article v-for="tool in tools" :key="tool.name" class="card">
-        <h2>{{ tool.title }}</h2>
-        <p class="name">{{ tool.name }}</p>
-        <p>{{ tool.description }}</p>
-        <table>
+      <article v-for="tool in tools" :key="tool.name" class="panel-card mt-[18px] max-w-[760px] px-5 py-[18px]">
+        <h2 class="m-0 font-display text-2xl">{{ tool.title }}</h2>
+        <p class="mb-2 mt-1 font-mono text-[13px] text-muted">{{ tool.name }}</p>
+        <p class="text-muted">{{ tool.description }}</p>
+        <table class="mt-3 w-full border-collapse text-sm">
           <thead>
             <tr>
-              <th>参数</th>
-              <th>类型</th>
-              <th>必填</th>
-              <th>说明</th>
+              <th class="border-t border-line/10 px-1.5 py-2 text-left align-top">参数</th>
+              <th class="border-t border-line/10 px-1.5 py-2 text-left align-top">类型</th>
+              <th class="border-t border-line/10 px-1.5 py-2 text-left align-top">必填</th>
+              <th class="border-t border-line/10 px-1.5 py-2 text-left align-top">说明</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="param in tool.parameters" :key="param.name">
-              <td>{{ param.name }}</td>
-              <td>{{ param.type }}</td>
-              <td>{{ param.required ? '是' : '否' }}</td>
-              <td>
+              <td class="border-t border-line/10 px-1.5 py-2 text-left align-top">{{ param.name }}</td>
+              <td class="border-t border-line/10 px-1.5 py-2 text-left align-top">{{ param.type }}</td>
+              <td class="border-t border-line/10 px-1.5 py-2 text-left align-top">
+                {{ param.required ? '是' : '否' }}
+              </td>
+              <td class="border-t border-line/10 px-1.5 py-2 text-left align-top">
                 {{ param.description }}
                 <span v-if="param.default !== undefined">默认 {{ param.default }}。</span>
               </td>
@@ -114,117 +116,3 @@ onMounted(load)
     </template>
   </section>
 </template>
-
-<style scoped>
-.page {
-  height: 100vh;
-  overflow: auto;
-  padding: 28px 32px 48px;
-}
-
-.page[data-embedded='true'] {
-  height: auto;
-  min-height: 100%;
-  padding: 16px 18px 32px;
-}
-
-.embedded-lead {
-  margin: 0;
-  color: var(--muted);
-}
-
-.eyebrow {
-  margin: 0;
-  color: var(--accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-h1 {
-  margin: 6px 0 0;
-  font-family: var(--font-display);
-  font-size: clamp(32px, 4vw, 44px);
-  letter-spacing: -0.03em;
-}
-
-header p,
-.card p {
-  color: var(--muted);
-}
-
-.card {
-  max-width: 760px;
-  margin-top: 18px;
-  padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--panel);
-  backdrop-filter: blur(8px);
-  box-shadow: var(--shadow);
-}
-
-h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 24px;
-}
-
-.name {
-  margin: 4px 0 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-}
-
-dl {
-  display: grid;
-  gap: 8px;
-  margin: 12px 0 0;
-}
-
-dl div {
-  display: grid;
-  grid-template-columns: 52px 1fr;
-  gap: 8px;
-}
-
-dt {
-  color: var(--muted);
-}
-
-dd {
-  margin: 0;
-}
-
-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-}
-
-table {
-  width: 100%;
-  margin-top: 12px;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-th,
-td {
-  padding: 8px 6px;
-  border-top: 1px solid var(--line);
-  text-align: left;
-  vertical-align: top;
-}
-
-.error {
-  color: var(--warn);
-}
-
-@media (max-width: 860px) {
-  .page {
-    height: auto;
-    padding: 16px;
-  }
-}
-</style>

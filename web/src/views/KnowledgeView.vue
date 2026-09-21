@@ -1,61 +1,70 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
+import IGFilterChip from '@/components/IGFilterChip.vue'
+import IGTagChip from '@/components/IGTagChip.vue'
 import { label } from '@/lib/labels'
+import {
+  emptyKbFilters,
+  facetCounts,
+  filterQuestions,
+  hasActiveKbFilters,
+  KB_CATEGORIES,
+  KB_DIFFICULTIES,
+  tagFrequency,
+  toggleInList,
+  type KbQuestion,
+} from '@/lib/kbFilter'
 
 defineProps<{ embedded?: boolean }>()
 
-type KbQuestion = {
-  id: string
-  category: string
-  topic: string
-  tags: string[]
-  difficulty: string
-  question: string
-  answer_outline: string
-}
+const TAG_PREVIEW = 24
 
 const questions = ref<KbQuestion[]>([])
 const loading = ref(true)
 const errorText = ref('')
-const keyword = ref('')
 const category = ref('all')
-const difficulty = ref('')
-const activeTag = ref('')
-const openId = ref('')
+const difficulties = ref<string[]>([])
+const tags = ref<string[]>([])
+const keyword = ref('')
+const selectedId = ref('')
+const tagsExpanded = ref(false)
+const mobileShowDetail = ref(false)
 
-const categories = [
-  { id: 'all', name: '全部' },
-  { id: 'frontend', name: '前端' },
-  { id: 'agent', name: 'Agent' },
-  { id: 'backend', name: '后端' },
-]
+const filters = computed(() => ({
+  category: category.value,
+  difficulties: difficulties.value,
+  tags: tags.value,
+  keyword: keyword.value,
+}))
 
-const difficulties = [
-  { id: 'easy', name: '简单' },
-  { id: 'medium', name: '中等' },
-  { id: 'hard', name: '困难' },
-]
+const filtered = computed(() => filterQuestions(questions.value, filters.value))
+const facets = computed(() => facetCounts(questions.value, filters.value))
+const filtersActive = computed(() => hasActiveKbFilters(filters.value))
 
-const filtered = computed(() => {
-  const needle = keyword.value.trim().toLowerCase()
-  return questions.value.filter((item) => {
-    if (category.value !== 'all' && item.category !== category.value) return false
-    if (difficulty.value && item.difficulty !== difficulty.value) return false
-    if (activeTag.value && !item.tags.includes(activeTag.value)) return false
-    if (!needle) return true
-    const haystack = [item.question, item.topic, item.id, item.tags.join(' ')].join(' ').toLowerCase()
-    return haystack.includes(needle)
-  })
-})
+const allTagsRanked = computed(() => tagFrequency(questions.value))
+const visibleTags = computed(() =>
+  tagsExpanded.value ? allTagsRanked.value : allTagsRanked.value.slice(0, TAG_PREVIEW),
+)
+const hiddenTagCount = computed(() => Math.max(0, allTagsRanked.value.length - TAG_PREVIEW))
 
-const counts = computed(() => {
-  const result: Record<string, number> = {}
-  for (const item of questions.value) {
-    result[item.category] = (result[item.category] || 0) + 1
-  }
-  return result
-})
+const selected = computed(
+  () => filtered.value.find((item) => item.id === selectedId.value) || null,
+)
+
+watch(
+  filtered,
+  (list) => {
+    if (!list.length) {
+      selectedId.value = ''
+      return
+    }
+    if (!list.some((item) => item.id === selectedId.value)) {
+      selectedId.value = list[0]?.id ?? ''
+    }
+  },
+  { immediate: true },
+)
 
 async function load() {
   loading.value = true
@@ -75,274 +84,193 @@ async function load() {
   }
 }
 
-function toggle(id: string) {
-  openId.value = openId.value === id ? '' : id
-}
-
-function selectTag(name: string) {
-  activeTag.value = activeTag.value === name ? '' : name
+function clearFilters() {
+  const empty = emptyKbFilters()
+  category.value = empty.category
+  difficulties.value = empty.difficulties
+  tags.value = empty.tags
+  keyword.value = empty.keyword
 }
 
 function selectDifficulty(id: string) {
-  difficulty.value = difficulty.value === id ? '' : id
+  difficulties.value = toggleInList(difficulties.value, id)
+}
+
+function selectTag(name: string) {
+  tags.value = toggleInList(tags.value, name)
+}
+
+function openQuestion(id: string) {
+  selectedId.value = id
+  mobileShowDetail.value = true
+}
+
+function backToList() {
+  mobileShowDetail.value = false
+}
+
+function difficultyTone(level: string) {
+  if (level === 'easy') return 'bg-[rgba(11,122,106,0.12)] text-accent'
+  if (level === 'hard') return 'bg-[rgba(180,35,24,0.1)] text-warn'
+  return 'bg-[rgba(18,32,46,0.08)] text-muted'
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <section class="page" :data-embedded="embedded || undefined">
-    <header v-if="!embedded">
+  <section :class="embedded ? 'page-embedded scroll-thin' : 'page-shell scroll-thin'">
+    <header v-if="!embedded" class="mb-4 flex-none">
       <p class="eyebrow">Knowledge</p>
-      <h1>知识库</h1>
-      <p v-if="!loading && !errorText">
-        共 {{ questions.length }} 道：前端 {{ counts.frontend || 0 }}，Agent
-        {{ counts.agent || 0 }}，后端 {{ counts.backend || 0 }}
-      </p>
+      <h1 class="mt-1.5 mb-0 font-display text-[clamp(32px,4vw,44px)] tracking-[-0.03em]">知识库</h1>
     </header>
-    <p v-else-if="!loading && !errorText" class="embedded-lead">
-      共 {{ questions.length }} 道：前端 {{ counts.frontend || 0 }}，Agent
-      {{ counts.agent || 0 }}，后端 {{ counts.backend || 0 }}
-    </p>
 
-    <div class="toolbar">
-      <div class="filters">
-        <button
-          v-for="item in categories"
+    <div
+      v-if="!loading && !errorText"
+      class="mb-3 flex flex-none flex-wrap items-center justify-between gap-2"
+    >
+      <p class="m-0 text-[13px] text-muted">
+        匹配 {{ filtered.length }} / 共 {{ questions.length }}
+      </p>
+      <button
+        v-if="filtersActive"
+        type="button"
+        class="border-0 bg-transparent p-0 text-[13px] text-accent underline-offset-2 hover:underline"
+        @click="clearFilters"
+      >
+        清空筛选
+      </button>
+    </div>
+
+    <div v-if="!loading && !errorText" class="mb-3 flex flex-none flex-col gap-2.5">
+      <input
+        v-model="keyword"
+        class="w-full rounded-xl border border-line/10 bg-panel-strong px-3 py-2 text-sm"
+        type="search"
+        placeholder="搜题目、主题、标签或编号"
+      />
+
+      <div class="flex flex-wrap gap-1.5">
+        <IGFilterChip
+          v-for="item in KB_CATEGORIES"
           :key="item.id"
-          type="button"
-          :data-on="category === item.id"
+          :active="category === item.id"
+          :disabled="(facets.categories[item.id] || 0) === 0 && item.id !== 'all'"
+          :count="facets.categories[item.id] || 0"
           @click="category = item.id"
         >
           {{ item.name }}
-        </button>
+        </IGFilterChip>
       </div>
-      <div class="filters">
-        <button
-          v-for="item in difficulties"
+
+      <div class="flex flex-wrap gap-1.5">
+        <IGFilterChip
+          v-for="item in KB_DIFFICULTIES"
           :key="item.id"
-          type="button"
-          :data-on="difficulty === item.id"
+          :active="difficulties.includes(item.id)"
+          :disabled="(facets.difficulties[item.id] || 0) === 0 && !difficulties.includes(item.id)"
+          :count="facets.difficulties[item.id] || 0"
           @click="selectDifficulty(item.id)"
         >
           {{ item.name }}
-        </button>
+        </IGFilterChip>
       </div>
-      <input v-model="keyword" type="search" placeholder="搜题目、主题或标签" />
-      <div v-if="activeTag" class="active-tag">
-        <button type="button" @click="activeTag = ''">{{ activeTag }} ×</button>
+
+      <div v-if="allTagsRanked.length" class="flex flex-wrap gap-1.5">
+        <IGTagChip
+          v-for="item in visibleTags"
+          :key="item.name"
+          :active="tags.includes(item.name)"
+          :disabled="(facets.tags[item.name] || 0) === 0 && !tags.includes(item.name)"
+          :count="facets.tags[item.name] || 0"
+          @click="selectTag(item.name)"
+        >
+          {{ item.name }}
+        </IGTagChip>
+        <IGTagChip v-if="!tagsExpanded && hiddenTagCount > 0" @click="tagsExpanded = true">
+          +{{ hiddenTagCount }} 更多
+        </IGTagChip>
+        <IGTagChip v-else-if="tagsExpanded && hiddenTagCount > 0" @click="tagsExpanded = false">
+          收起
+        </IGTagChip>
       </div>
     </div>
 
-    <p v-if="loading">正在读取题目…</p>
-    <p v-else-if="errorText" class="error">{{ errorText }}</p>
-    <p v-else-if="!filtered.length">没有匹配的题目。</p>
-    <ul v-else>
-      <li v-for="item in filtered" :key="item.id">
-        <button type="button" class="row" @click="toggle(item.id)">
-          <span class="meta"
-            >{{ label(item.category) }} / {{ item.topic }} / {{ label(item.difficulty) }}</span
-          >
-          <span class="title">{{ item.question }}</span>
+    <p v-if="loading" class="text-muted">正在读取题目…</p>
+    <p v-else-if="errorText" class="text-warn">{{ errorText }}</p>
+    <p v-else-if="!filtered.length" class="text-muted">没有匹配的题目。</p>
+
+    <div
+      v-else
+      class="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden rounded-panel border border-line/10 bg-white/70 max-md:min-h-[420px] md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)]"
+      :class="embedded ? 'min-h-0' : 'min-h-[560px]'"
+    >
+      <!-- 左列表：窄屏有选中详情时隐藏 -->
+      <div
+        class="scroll-thin flex min-h-0 flex-col overflow-auto border-line/10 md:border-r"
+        :class="mobileShowDetail ? 'max-md:hidden' : ''"
+      >
+        <button
+          v-for="item in filtered"
+          :key="item.id"
+          type="button"
+          class="kb-row"
+          :data-active="selectedId === item.id"
+          @click="openQuestion(item.id)"
+        >
+          <span class="flex items-center gap-2">
+            <span class="diff-pill" :class="difficultyTone(item.difficulty)">{{
+              label(item.difficulty)
+            }}</span>
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-muted">{{
+              item.topic
+            }}</span>
+          </span>
+          <span class="line-clamp-2 text-[14px] font-semibold leading-snug">{{ item.question }}</span>
         </button>
-        <div v-if="item.tags.length" class="tag-row">
-          <button
-            v-for="name in item.tags"
-            :key="name"
-            type="button"
-            class="tag"
-            :data-on="activeTag === name"
-            @click="selectTag(name)"
-          >
-            {{ name }}
-          </button>
-        </div>
-        <div v-if="openId === item.id" class="detail">
-          <p><em>参考答案</em>{{ item.answer_outline }}</p>
-          <p class="qid">{{ item.id }}</p>
-        </div>
-      </li>
-    </ul>
+      </div>
+
+      <!-- 右详情 -->
+      <div
+        class="scroll-thin min-h-0 overflow-auto px-4 py-4 max-md:px-3.5"
+        :class="mobileShowDetail ? '' : 'max-md:hidden'"
+      >
+        <button
+          type="button"
+          class="mb-3 border-0 bg-transparent p-0 text-[13px] text-accent md:hidden"
+          @click="backToList"
+        >
+          ← 返回列表
+        </button>
+
+        <template v-if="selected">
+          <p class="m-0 text-[13px] text-muted">
+            {{ label(selected.category) }} · {{ selected.topic }} ·
+            {{ label(selected.difficulty) }}
+          </p>
+          <h2 class="mt-2 mb-0 font-display text-[clamp(20px,2.4vw,26px)] leading-snug tracking-tight">
+            {{ selected.question }}
+          </h2>
+
+          <div v-if="selected.tags.length" class="mt-3 flex flex-wrap gap-1.5">
+            <IGTagChip
+              v-for="name in selected.tags"
+              :key="name"
+              :active="tags.includes(name)"
+              @click="selectTag(name)"
+            >
+              {{ name }}
+            </IGTagChip>
+          </div>
+
+          <div class="mt-5 border-t border-line/8 pt-4">
+            <p class="m-0 mb-2 text-xs font-bold uppercase tracking-[0.12em] text-accent">参考答案</p>
+            <p class="m-0 whitespace-pre-wrap text-[15px] leading-[1.7]">{{ selected.answer_outline }}</p>
+          </div>
+          <p class="mt-4 mb-0 font-mono text-[12px] text-muted">{{ selected.id }}</p>
+        </template>
+        <p v-else class="m-0 text-sm text-muted">从左侧选择一道题查看参考答案。</p>
+      </div>
+    </div>
   </section>
 </template>
-
-<style scoped>
-.page {
-  height: 100vh;
-  overflow: auto;
-  padding: 28px 32px 48px;
-}
-
-.page[data-embedded='true'] {
-  height: auto;
-  min-height: 100%;
-  padding: 16px 18px 32px;
-}
-
-.embedded-lead {
-  margin: 0 0 12px;
-  color: var(--muted);
-}
-
-.eyebrow {
-  margin: 0;
-  color: var(--accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-h1 {
-  margin: 6px 0 0;
-  font-family: var(--font-display);
-  font-size: clamp(32px, 4vw, 44px);
-  letter-spacing: -0.03em;
-}
-
-header p {
-  margin: 8px 0 0;
-  color: var(--muted);
-}
-
-.toolbar {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-  margin: 20px 0;
-}
-
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.filters button,
-input {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel-strong);
-  padding: 8px 12px;
-}
-
-.filters button {
-  flex: none;
-  white-space: nowrap;
-}
-
-.filters button[data-on='true'] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-input {
-  width: 100%;
-}
-
-.error {
-  color: var(--warn);
-}
-
-ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-li {
-  margin-bottom: 10px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--panel);
-  backdrop-filter: blur(8px);
-  box-shadow: var(--shadow);
-}
-
-.row {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  padding: 14px 16px 8px;
-  border: 0;
-  background: transparent;
-  text-align: left;
-}
-
-.meta {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.title {
-  font-weight: 650;
-}
-
-.detail {
-  padding: 0 16px 14px;
-}
-
-.detail p {
-  margin: 0;
-  line-height: 1.65;
-}
-
-.detail em {
-  display: inline-block;
-  margin-right: 8px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-style: normal;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.tag-row,
-.active-tag {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.tag-row {
-  padding: 0 16px 12px;
-}
-
-.tag,
-.active-tag button {
-  flex: none;
-  white-space: nowrap;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel-strong);
-  padding: 2px 8px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.tag[data-on='true'],
-.active-tag button {
-  background: var(--accent-soft);
-  border-color: transparent;
-  color: var(--accent);
-  font-weight: 700;
-}
-
-.qid {
-  margin-top: 8px !important;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-@media (max-width: 860px) {
-  .page {
-    height: auto;
-    padding: 16px;
-  }
-}
-</style>
