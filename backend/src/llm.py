@@ -35,30 +35,37 @@ def complete_text(prompt: str) -> str:
     return "".join(iter_model([{"role": "user", "content": prompt}], yield_content=True))
 
 
-def iter_model(messages: list[dict], yield_content: bool = True) -> Iterator[str]:
+def iter_model(
+    messages: list[dict],
+    yield_content: bool = True,
+    *,
+    thinking: bool = True,
+) -> Iterator[str]:
     """流式调用 DeepSeek，把 reasoning_content 交给当前思考回调，正文按片段返回。"""
     client = OpenAI(
         api_key=_api_key(),
         base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
         timeout=120,
     )
+    extra_body = {"thinking": {"type": "enabled" if thinking else "disabled"}}
     stream = client.chat.completions.create(
         model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
         messages=messages,
         stream=True,
         temperature=0.2,
-        extra_body={"thinking": {"type": "enabled"}},
+        extra_body=extra_body,
     )
     for chunk in stream:
         choices = getattr(chunk, "choices", None) or []
         if not choices:
             continue
         delta = choices[0].delta
-        reasoning = _reasoning_text(delta)
-        if reasoning:
-            hook = _reasoning_hook.get()
-            if hook:
-                hook(reasoning)
+        if thinking:
+            reasoning = _reasoning_text(delta)
+            if reasoning:
+                hook = _reasoning_hook.get()
+                if hook:
+                    hook(reasoning)
         if yield_content:
             content = getattr(delta, "content", None) or ""
             if content:

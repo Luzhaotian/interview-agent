@@ -24,6 +24,19 @@ export type Question = {
   source_url?: string
 }
 
+export type WebCandidate = {
+  id: string
+  category: string
+  topic: string
+  tags: string[]
+  difficulty: string
+  question: string
+  answer_outline: string
+  source?: string
+  source_title?: string
+  source_url?: string
+}
+
 export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
@@ -33,6 +46,7 @@ export type ChatMessage = {
   questions?: Question[]
   thinking?: string[]
   reasoning?: string
+  webCandidates?: WebCandidate[]
   decision?: InterviewDecision
   reports?: ResumeReport[]
   streaming?: boolean
@@ -52,6 +66,7 @@ export type ResumeReport = {
   thinking: string[]
   profile?: Profile
   questions: Question[]
+  webCandidates?: WebCandidate[]
   decision?: InterviewDecision
   error?: string
 }

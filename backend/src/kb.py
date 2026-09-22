@@ -6,7 +6,17 @@ from pathlib import Path
 
 import jieba
 from pydantic import BaseModel, Field, ValidationError
-from rank_bm25 import BM25Okapi
+
+from src.embeddings import (
+    EMBEDDINGS_PATH,
+    active_backend,
+    cosine_scores,
+    embed_corpus,
+    embed_query,
+    embeddings_match,
+    load_embeddings,
+    save_embeddings,
+)
 
 jieba.setLogLevel(20)
 
@@ -25,6 +35,27 @@ SKILL_ALIASES = {
     "langgraph": ["agent"],
     "langchain": ["agent"],
     "rag": ["agent"],
+    # 简历写法 ↔ 题库 tags/topic，避免误报缺口去联网抓垃圾
+    "html5": ["html"],
+    "html": ["html5"],
+    "css3": ["css"],
+    "css": ["css3"],
+    "js": ["javascript", "es6"],
+    "javascript": ["js", "es6"],
+    "es6": ["javascript", "js", "es2015"],
+    "es2015": ["es6", "javascript"],
+    "ts": ["typescript"],
+    "typescript": ["ts"],
+    "vue3": ["vue"],
+    "vue2": ["vue"],
+    "vue": ["vue3", "vue2"],
+    "reactjs": ["react"],
+    "react.js": ["react"],
+    "nodejs": ["node", "node.js"],
+    "node.js": ["node", "nodejs"],
+    "node": ["nodejs", "node.js"],
+    "webpack": ["工程化", "打包"],
+    "vite": ["工程化", "打包"],
 }
 
 
@@ -45,14 +76,23 @@ def ingest() -> list[dict]:
         json.dumps({"questions": questions}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    texts = [_index_text(item) for item in questions]
+    backend = active_backend()
+    print(f"正在为 {len(questions)} 道题生成向量（backend={backend}）…")
+    matrix = embed_corpus(texts)
+    save_embeddings([item["id"] for item in questions], matrix)
+    print(f"向量已写入 {EMBEDDINGS_PATH}，维度 {matrix.shape[1]}")
     return questions
 
 
 def load_index() -> list[dict]:
-    if not INDEX_PATH.is_file() or _kb_newer_than_index():
+    if not INDEX_PATH.is_file() or _kb_newer_than_index() or not _embeddings_ready():
         return ingest()
     payload = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-    return payload["questions"]
+    questions = payload["questions"]
+    if not embeddings_match(questions):
+        return ingest()
+    return questions
 
 
 def scan_kb() -> list[dict]:
@@ -91,11 +131,11 @@ def scan_kb() -> list[dict]:
 
 
 def retrieve(profile: dict, questions: list[dict], limit: int = 40) -> list[dict]:
+    """向量相似度检索，再叠加分类权重与技能标签重合。"""
     if not questions:
         return []
 
-    corpus = [_tokenize(_index_text(item)) for item in questions]
-    bm25 = BM25Okapi(corpus)
+    matrix = _question_matrix(questions)
     query = " ".join(
         [
             " ".join(profile.get("skills") or []),
@@ -104,14 +144,15 @@ def retrieve(profile: dict, questions: list[dict], limit: int = 40) -> list[dict
             profile.get("focus") or "",
         ]
     )
-    scores = bm25.get_scores(_tokenize(query))
+    scores = cosine_scores(embed_query(query), matrix)
     weights = _category_weights(profile.get("focus") or "frontend")
     skill_tokens = _skill_tokens(profile.get("skills") or [])
 
     ranked: list[tuple[float, dict]] = []
     for item, score in zip(questions, scores):
         overlap = _skill_overlap(item, skill_tokens)
-        ranked.append((float(score) * weights.get(item["category"], 1.0) + overlap * 1.5, item))
+        # 余弦约在 [-1,1]，面试题通常 >0；再乘分类权重，并给技能重合加分
+        ranked.append((float(score) * weights.get(item["category"], 1.0) + overlap * 0.08, item))
 
     ranked.sort(key=lambda pair: pair[0], reverse=True)
     if ranked and ranked[0][0] <= 0:
@@ -155,6 +196,20 @@ def find_skill_gaps(profile: dict, questions: list[dict], max_gaps: int = 3) -> 
         if len(gaps) >= max_gaps:
             break
     return gaps
+
+
+def _question_matrix(questions: list[dict]):
+    loaded = load_embeddings()
+    if loaded and embeddings_match(questions):
+        _, vectors, _, _ = loaded
+        return vectors
+    matrix = embed_corpus([_index_text(item) for item in questions])
+    save_embeddings([item["id"] for item in questions], matrix)
+    return matrix
+
+
+def _embeddings_ready() -> bool:
+    return EMBEDDINGS_PATH.is_file()
 
 
 def _skill_covered(skill: str, questions: list[dict]) -> bool:

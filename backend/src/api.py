@@ -193,15 +193,13 @@ async def recommend_stream(
             events_queue.put(payload)
 
         def worker() -> None:
-            token = bind_reasoning(
-                lambda text: on_event({"type": "thinking", "text": text, "append": True})
-            )
             try:
                 total = len(saved)
                 for index, (name, path) in enumerate(saved, start=1):
                     on_event({"type": "resume", "name": name, "index": index, "total": total})
                     try:
                         state = run_recommend_stream(str(path), target_count, on_event=on_event)
+                        # 开场说明阶段关闭 reasoning 回调，避免模型草稿再次灌进「思考过程」
                         for piece in stream_intro_tokens(state["profile"], state["selected"]):
                             on_event({"type": "token", "text": piece})
                     except SystemExit as exc:
@@ -210,7 +208,6 @@ async def recommend_stream(
                         on_event({"type": "error", "name": name, "detail": f"生成失败：{exc}"})
                 events_queue.put({"type": "done"})
             finally:
-                unbind_reasoning(token)
                 _cleanup_paths([path for _, path in saved])
                 events_queue.put(None)
 

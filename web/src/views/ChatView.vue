@@ -14,6 +14,7 @@ import {
   type Profile,
   type Question,
   type ResumeReport,
+  type WebCandidate,
 } from '@/lib/transcript'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
@@ -457,6 +458,10 @@ function applyStreamEvent(messageId: string, event: SseEvent, reportKey = '') {
     } else if (event.type === 'decision' && event.decision) {
       if (report) report.decision = event.decision
       else message.decision = event.decision
+    } else if (event.type === 'web_candidates' && Array.isArray(event.candidates)) {
+      const list = event.candidates as WebCandidate[]
+      if (report) report.webCandidates = list
+      else message.webCandidates = list
     } else if (event.type === 'token' && event.text) {
       if (report) report.text += event.text
       else message.text += event.text
@@ -597,6 +602,15 @@ async function copyText(text: string) {
   }
 }
 
+function webCandidatesJson(items: WebCandidate[]) {
+  return JSON.stringify({ questions: items }, null, 2)
+}
+
+async function copyWebCandidates(items: WebCandidate[]) {
+  await copyText(webCandidatesJson(items))
+  notice.value = '联网候选已复制，可粘贴进 kb/ 后执行 ingest'
+}
+
 function copyAll() {
   void copyText(transcriptMarkdown(chat.messages))
 }
@@ -719,29 +733,64 @@ function exportChat() {
               >
                 <h2 class="m-0 text-[15px]">{{ report.name }}</h2>
                 <details
-                  v-if="report.reasoning || report.thinking.length"
-                  class="mb-0 rounded-xl bg-[rgba(18,32,46,0.04)] px-3 py-2.5"
+                  v-if="report.thinking.length || report.reasoning"
+                  class="mb-0 rounded-xl border border-line/8 bg-white/60 px-3 py-2.5"
                   :open="message.streaming || undefined"
                 >
-                  <summary class="cursor-pointer [font-weight:650] text-muted">
-                    {{ message.streaming ? '正在思考…' : '思考过程' }}
+                  <summary class="cursor-pointer text-[13px] font-semibold text-muted">
+                    {{ message.streaming ? '正在思考…' : '步骤' }}
+                    <span v-if="report.thinking.length" class="ml-1 font-normal opacity-70"
+                      >{{ report.thinking.length }}</span
+                    >
                   </summary>
-                  <p
-                    v-if="report.reasoning"
-                    class="mt-2.5 mb-0 whitespace-pre-wrap text-sm leading-[1.65] text-muted"
+                  <ol
+                    v-if="report.thinking.length"
+                    class="mt-2.5 mb-0 list-decimal pl-[1.2em] text-[13px] leading-relaxed text-muted"
                   >
-                    {{ report.reasoning }}
-                  </p>
-                  <ol v-if="report.thinking.length" class="mt-2.5 mb-0 pl-[18px] text-sm text-muted">
                     <li
                       v-for="(step, index) in report.thinking"
                       :key="`${report.key}-think-${index}`"
-                      class="mt-0 [&+&]:mt-1"
+                      class="mt-0 pl-1 [&+&]:mt-1.5"
                     >
                       {{ step }}
                     </li>
                   </ol>
+                  <details v-if="report.reasoning" class="mt-2.5 border-t border-line/8 pt-2">
+                    <summary class="cursor-pointer text-xs text-muted/80">模型草稿（可忽略）</summary>
+                    <p class="mt-1.5 mb-0 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-snug text-muted/70">
+                      {{ report.reasoning }}
+                    </p>
+                  </details>
                 </details>
+
+                <div
+                  v-if="report.webCandidates?.length"
+                  class="rounded-xl border border-dashed border-accent/35 bg-accent-soft/40 px-3 py-2.5"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="m-0 text-[13px] font-semibold text-accent">
+                      联网补题 {{ report.webCandidates.length }} 道（可沉淀进知识库）
+                    </p>
+                    <IGButton size="sm" class="rounded-xl px-2 py-1" @click="copyWebCandidates(report.webCandidates)">
+                      复制 JSON
+                    </IGButton>
+                  </div>
+                  <p class="mt-1 mb-0 text-xs text-muted">
+                    已写入后端 <code class="text-xs">output/web-inbox-latest.json</code>；复制后可放进
+                    <code class="text-xs">kb/</code> 再
+                    <code class="text-xs">python main.py ingest</code>
+                  </p>
+                  <ul class="mt-2 mb-0 list-none p-0">
+                    <li
+                      v-for="item in report.webCandidates"
+                      :key="item.id"
+                      class="border-t border-line/8 py-1.5 text-[13px] leading-snug first:border-0 first:pt-0"
+                    >
+                      <span class="text-muted">{{ item.topic }} · </span>{{ item.question }}
+                    </li>
+                  </ul>
+                </div>
+
                 <p v-if="report.error" class="m-0 text-[#9f1239]">{{ report.error }}</p>
                 <div
                   v-if="report.text"
@@ -853,29 +902,58 @@ function exportChat() {
 
             <template v-else>
               <details
-                v-if="message.reasoning || message.thinking?.length"
-                class="mb-3 rounded-xl bg-[rgba(18,32,46,0.04)] px-3 py-2.5"
+                v-if="message.thinking?.length || message.reasoning"
+                class="mb-3 rounded-xl border border-line/8 bg-white/60 px-3 py-2.5"
                 :open="message.streaming || undefined"
               >
-                <summary class="cursor-pointer [font-weight:650] text-muted">
-                  {{ message.streaming ? '正在思考…' : '思考过程' }}
+                <summary class="cursor-pointer text-[13px] font-semibold text-muted">
+                  {{ message.streaming ? '正在思考…' : '步骤' }}
+                  <span v-if="message.thinking?.length" class="ml-1 font-normal opacity-70">{{
+                    message.thinking.length
+                  }}</span>
                 </summary>
-                <p
-                  v-if="message.reasoning"
-                  class="mt-2.5 mb-0 whitespace-pre-wrap text-sm leading-[1.65] text-muted"
+                <ol
+                  v-if="message.thinking?.length"
+                  class="mt-2.5 mb-0 list-decimal pl-[1.2em] text-[13px] leading-relaxed text-muted"
                 >
-                  {{ message.reasoning }}
-                </p>
-                <ol v-if="message.thinking?.length" class="mt-2.5 mb-0 pl-[18px] text-sm text-muted">
                   <li
                     v-for="(step, index) in message.thinking"
                     :key="`${message.id}-${index}`"
-                    class="mt-0 [&+&]:mt-1"
+                    class="mt-0 pl-1 [&+&]:mt-1.5"
                   >
                     {{ step }}
                   </li>
                 </ol>
+                <details v-if="message.reasoning" class="mt-2.5 border-t border-line/8 pt-2">
+                  <summary class="cursor-pointer text-xs text-muted/80">模型草稿（可忽略）</summary>
+                  <p class="mt-1.5 mb-0 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-snug text-muted/70">
+                    {{ message.reasoning }}
+                  </p>
+                </details>
               </details>
+
+              <div
+                v-if="message.webCandidates?.length"
+                class="mb-3 rounded-xl border border-dashed border-accent/35 bg-accent-soft/40 px-3 py-2.5"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="m-0 text-[13px] font-semibold text-accent">
+                    联网补题 {{ message.webCandidates.length }} 道（可沉淀进知识库）
+                  </p>
+                  <IGButton size="sm" class="rounded-xl px-2 py-1" @click="copyWebCandidates(message.webCandidates)">
+                    复制 JSON
+                  </IGButton>
+                </div>
+                <ul class="mt-2 mb-0 list-none p-0">
+                  <li
+                    v-for="item in message.webCandidates"
+                    :key="item.id"
+                    class="border-t border-line/8 py-1.5 text-[13px] leading-snug first:border-0 first:pt-0"
+                  >
+                    <span class="text-muted">{{ item.topic }} · </span>{{ item.question }}
+                  </li>
+                </ul>
+              </div>
 
               <div
                 v-if="message.role === 'assistant' && message.text"

@@ -4,7 +4,7 @@
 
 一次可以上传多份简历，每份单独出题，也可以单独判断是否进入可约面试。
 
-DeepSeek 负责读简历和从候选题里挑选。检索在本机完成，不需要向量模型。
+DeepSeek 负责读简历和从候选题里挑选。检索在本机用向量相似度完成，不依赖向量数据库。
 
 ## 目录
 
@@ -111,4 +111,4 @@ python main.py recommend resumes/你的简历.md --count 12
 
 ## 更多
 
-流程、环境变量、知识库 JSON / Markdown 格式，以及为什么不用向量检索，见 [backend/README.md](backend/README.md)。
+流程、环境变量、知识库 JSON / Markdown 格式，以及向量检索说明，见 [backend/README.md](backend/README.md)。

@@ -2,7 +2,7 @@
 
 扫描简历，选出 10 到 20 道面试题。题库以前端为主，也包含 Agent 和后端。基础、框架和架构题只能用知识库或当次联网补到的题，不改题干。过往经历题根据简历来写。
 
-DeepSeek 负责读简历和从候选题里挑选。检索在本机完成，不需要向量模型。
+DeepSeek 负责读简历和从候选题里挑选。检索在本机用向量相似度完成，不依赖向量数据库。
 
 ## 目录
 
@@ -16,7 +16,8 @@ backend/
 ├── src/
 │   ├── api.py              # HTTP 接口
 │   ├── graph.py            # LangGraph 流程
-│   ├── kb.py               # 扫描知识库、BM25 检索
+│   ├── kb.py               # 扫描知识库、向量检索
+│   ├── embeddings.py       # fastembed 编码 + numpy 余弦相似度
 │   ├── rules.py            # 读取 rules/ 里的规则和建议
 │   ├── web_questions.py    # 联网查题（推荐流程直接调用）
 │   ├── resume.py           # 读取简历
@@ -28,7 +29,8 @@ backend/
 │   ├── agent/              # Agent 题
 │   └── backend/            # 后端题
 ├── resumes/                # 放简历
-├── data/index.json         # ingest 生成的索引，已忽略提交
+├── data/index.json         # ingest 生成的题目索引，已忽略提交
+├── data/embeddings.npz     # ingest 生成的题向量，已忽略提交
 ├── output/questions.md     # 推荐结果
 ├── .env.example
 └── requirements.txt
@@ -64,7 +66,7 @@ QUESTION_COUNT=15
 | `DEEPSEEK_MODEL` | 默认 `deepseek-chat` |
 | `QUESTION_COUNT` | 默认 15。小于 10 会按 10，大于 20 会按 20 |
 
-`ingest` 不调用模型，没有 Key 也能建索引。
+`ingest` 不调用 DeepSeek，但会下载 / 加载本机 embedding 模型并生成向量。
 
 ## 使用
 
@@ -76,9 +78,9 @@ python main.py recommend resumes/你的简历.pdf
 python main.py recommend resumes/你的简历.md --count 12
 ```
 
-`ingest` 扫描 `kb/` 里的 JSON 和 Markdown，校验字段后写入 `data/index.json`。
+`ingest` 扫描 `kb/` 里的 JSON 和 Markdown，校验字段后写入 `data/index.json`，并为每道题生成向量（默认 TF-IDF+SVD），写入 `data/embeddings.npz`。
 
-`recommend` 读简历、检索、选题，把报告打到终端，并覆盖写入 `output/questions.md`。如果知识库比索引新，会先自动重新扫描，不必每次手动 `ingest`。
+`recommend` 读简历、向量检索、选题，把报告打到终端，并覆盖写入 `output/questions.md`。如果知识库比索引新，或向量文件缺失 / 与题目 id 对不上，会先自动重新扫描并重建向量。
 
 简历支持：
 
@@ -98,7 +100,7 @@ python main.py recommend resumes/你的简历.md --count 12
 
 1. **扫描简历**。抽出纯文本，最多取前 12000 字送给模型。
 2. **抽取画像**。DeepSeek 返回年限、方向（`frontend` / `backend` / `agent`）、技能、项目和两句摘要。方向无法识别时按前端处理。
-3. **检索**。用结巴分词和 BM25 从索引里取大约 40 道候选。方向匹配的题会加权。简历里出现 MySQL、LangGraph、RAG 这类技能时，会额外带上对应分类的题；纯前端简历则候选几乎都是前端题。若某项技能几乎没有对应题，会在进程内调用 `search_interview_questions` 补候选，不经过 `.cursor/mcp.json`。
+3. **检索**。用本机 embedding 模型把简历画像和每道题编成向量，按余弦相似度取大约 40 道候选；再乘分类权重，并给技能 / 标签重合加分。简历里出现 MySQL、LangGraph、RAG 这类技能时，会额外带上对应分类的题；纯前端简历则候选几乎都是前端题。若某项技能几乎没有对应题，会在进程内调用 `search_interview_questions` 补候选，不经过 `.cursor/mcp.json`。
 4. **选题**。知识库题和联网补题只能使用候选 id，无效 id 会被丢掉，数量不够时用检索结果补齐，不改题干。过往经历题另根据简历生成，并点名具体项目。选题和措辞还会读 `rules/suggestions.md`。
 5. **写报告**。每题包含分类、主题、难度、为什么问，以及答题要点。
 
@@ -176,6 +178,22 @@ difficulty: medium
 
 直接改这两份 Markdown。题量配额，以及基础、框架、架构题必须来自候选题，仍由程序保证。`.cursor/mcp.json` 不参与出题，只给 Cursor 对话手动调用 `interview-web`。
 
-## 为什么不用向量检索
+## 向量检索怎么做的
 
-DeepSeek 的接口只有对话，没有 embedding。题库是几百道结构化题，用关键词和标签检索就够，也不用再配一套向量模型或第二个 Key。
+DeepSeek 只有对话接口，没有 embedding，所以向量在本机做，**不依赖向量数据库**。
+
+1. **默认 backend=`local`**：`TF-IDF（字级 n-gram）→ TruncatedSVD(256)` 得到稠密向量，写入 `data/embeddings.npz`，编码器写入 `data/vectorizer.joblib`。纯本机，适合对照余弦公式学习。
+2. **可选 backend=`neural`**：环境变量 `EMBEDDING_BACKEND=neural`，用 `fastembed` 加载 `BAAI/bge-small-zh-v1.5`（语义向量；首次需下载，默认走 `HF_ENDPOINT` 镜像）。
+3. **查询**：简历 skills / projects / summary / focus → 查询向量，与题库矩阵做**余弦相似度**（向量已 L2 归一化，点积即可）。
+4. **重排**：相似度 × 分类权重 + 技能标签重合加分，再按 focus 优先取约 40 道候选。
+
+前端知识库页面仍是全量拉取后本地分面过滤，不走这套向量检索。
+
+```bash
+# 默认本地稠密向量
+python main.py ingest
+
+# 改用语义向量（需能下载模型）
+EMBEDDING_BACKEND=neural python main.py ingest
+```
+

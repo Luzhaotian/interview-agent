@@ -1,5 +1,5 @@
 /** 把流式片段拆成逐字展示，更接近常见聊天工具的打字感。 */
-export function createTypewriter(onChar: (chunk: string, meta?: string) => void, delayMs = 16) {
+export function createTypewriter(onChar: (chunk: string, meta?: string) => void, delayMs = 22) {
   const queue: { char: string; meta?: string }[] = []
   let running = false
   let closed = false

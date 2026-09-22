@@ -56,7 +56,7 @@ Node 版本见根目录 `.nvmrc`。密钥只放 `backend/.env`（参考 `.env.ex
 ## 后端约定（backend/）
 
 - 题库分类仅 `frontend` / `agent` / `backend`；难度仅 `easy` / `medium` / `hard`。
-- 检索以本机 BM25 / 规则加权为主，不要默认引入向量库或新外部服务，除非需求明确要求。
+- 检索以本机向量（默认 TF-IDF+SVD / 可选 fastembed）+ 余弦相似度为主，并叠加分类 / 技能加权；不要默认再引入向量数据库，除非需求明确要求。
 - API 路由与 SSE 事件名保持与 `README.md` 一致；改协议时同步前端 `sse.ts` / store。
 
 ## Git 与协作

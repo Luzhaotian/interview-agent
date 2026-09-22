@@ -336,7 +336,8 @@ def run_recommend_stream(
 
         if gaps:
             state.update(fill_gaps_via_mcp(state))
-            web_count = len(state.get("web_candidates") or [])
+            web_items = list(state.get("web_candidates") or [])
+            web_count = len(web_items)
             emit(
                 {
                     "type": "thinking",
@@ -345,6 +346,10 @@ def run_recommend_stream(
                     else "MCP 联网未拿到可用题目，仍以知识库候选继续。",
                 }
             )
+            if web_items:
+                public = [_public_web_candidate(item) for item in web_items]
+                emit({"type": "web_candidates", "candidates": public})
+                _write_web_inbox(public)
         else:
             state.update({"web_candidates": []})
 
@@ -369,7 +374,8 @@ def stream_intro_tokens(profile: dict, questions: list[dict]) -> Iterator[str]:
 阶段分布：{json.dumps(stage_counts, ensure_ascii=False)}
 题量：{len(questions)}
 {playbook_block("suggestions", "开场说明同时遵守这些建议：")}"""
-    yield from iter_model([{"role": "user", "content": prompt}])
+    # 关闭 thinking，正文可边生成边推 SSE，前端才能打字机展示
+    yield from iter_model([{"role": "user", "content": prompt}], thinking=False)
 
 
 def stream_chat_tokens(messages: list, context: str) -> Iterator[str]:
@@ -385,7 +391,7 @@ def stream_chat_tokens(messages: list, context: str) -> Iterator[str]:
     payload = [{"role": "system", "content": system}]
     for role, text in messages:
         payload.append({"role": role, "content": text})
-    yield from iter_model(payload)
+    yield from iter_model(payload, thinking=False)
 
 
 def iter_chat_events(
@@ -727,7 +733,7 @@ def _stream_more_intro(profile: dict, questions: list[dict], probe: bool = False
 阶段分布：{json.dumps(stage_counts, ensure_ascii=False)}
 题量：{len(questions)}
 {playbook_block("suggestions", "说明这批题目时同时遵守这些建议：")}"""
-    yield from iter_model([{"role": "user", "content": prompt}])
+    yield from iter_model([{"role": "user", "content": prompt}], thinking=False)
 
 
 def _public_selected(item: dict) -> dict:
@@ -747,6 +753,36 @@ def _public_selected(item: dict) -> dict:
         "source_title": item.get("source_title") or "",
         "source_url": item.get("source_url") or "",
     }
+
+
+def _public_web_candidate(item: dict) -> dict:
+    """给前端沉淀用的联网候选（可直接改成 kb JSON）。"""
+    return {
+        "id": item["id"],
+        "category": item.get("category") or "frontend",
+        "topic": item.get("topic") or "",
+        "tags": list(item.get("tags") or []),
+        "difficulty": item.get("difficulty") or "medium",
+        "question": item.get("question") or "",
+        "answer_outline": item.get("answer_outline") or "",
+        "source": "web",
+        "source_title": item.get("source_title") or "",
+        "source_url": item.get("source_url") or "",
+    }
+
+
+def _write_web_inbox(candidates: list[dict]) -> None:
+    """落到 output/，方便你审过后拷进 kb/。"""
+    folder = ROOT / "output"
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = folder / f"web-inbox-{stamp}.json"
+    path.write_text(
+        json.dumps({"questions": candidates}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    latest = folder / "web-inbox-latest.json"
+    latest.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _normalize_stage(raw, item: dict, reason: str) -> str:

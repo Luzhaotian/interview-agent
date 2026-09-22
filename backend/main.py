@@ -39,7 +39,7 @@ def main() -> None:
         questions = ingest()
         counts = _count_by_category(questions)
         print(
-            f"已索引 {len(questions)} 道题："
+            f"已索引 {len(questions)} 道题（含向量）："
             f"前端 {counts.get('frontend', 0)}，"
             f"Agent {counts.get('agent', 0)}，"
             f"后端 {counts.get('backend', 0)}"

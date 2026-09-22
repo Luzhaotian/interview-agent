@@ -4,6 +4,8 @@ venv/
 __pycache__/
 *.pyc
 data/*.json
+data/*.npz
+data/*.joblib
 output/*.md
 .DS_Store
 resumes/*

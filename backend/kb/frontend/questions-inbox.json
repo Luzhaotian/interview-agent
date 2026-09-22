@@ -1,0 +1,56 @@
+[
+  {
+    "id": "fe-redux-001",
+    "category": "frontend",
+    "topic": "Redux",
+    "tags": ["redux", "状态管理", "react"],
+    "difficulty": "medium",
+    "question": "为什么项目里要上 Redux（或同类全局状态库），而不是只用组件本地 state 和 props 层层传递？",
+    "answer_outline": "跨多层、跨路由的共享状态用 props 会形成「钻取」，改一处牵动很多组件。Redux 把可预测的状态放进单一 store，用 action/reducer 明确规定怎么改，便于调试和时间旅行。代价是样板代码和心智负担；状态只在父子间流动、生命周期短时，用本地 state 或 Context 就够，不必上 Redux。"
+  },
+  {
+    "id": "fe-redux-002",
+    "category": "frontend",
+    "topic": "Redux",
+    "tags": ["redux", "中间件", "异步"],
+    "difficulty": "medium",
+    "question": "Redux 里发异步请求一般放哪一层？为什么不能直接在 reducer 里请求接口？",
+    "answer_outline": "reducer 必须是纯函数：同样输入得到同样输出，不能有副作用。异步请求、写 localStorage 应放在 middleware（如 thunk、saga）或 RTK 的 createAsyncThunk 里，成功/失败再 dispatch 同步 action 更新 store。这样状态变更可追踪，也方便单测 reducer。"
+  },
+  {
+    "id": "fe-electron-001",
+    "category": "frontend",
+    "topic": "Electron",
+    "tags": ["electron", "桌面端", "主进程"],
+    "difficulty": "medium",
+    "question": "为什么桌面端会选 Electron？它和纯原生客户端比，主要优势和代价是什么？",
+    "answer_outline": "优势是用 Web 技术复用前端人力，一套代码跨 Windows/macOS/Linux，迭代快。代价是包体积大、内存占用高于精简原生应用，且必须认真处理主进程/渲染进程隔离和安全。IM、内部工具、强 Web 生态的产品常见；极致性能或系统深度集成时更宜原生或 Tauri 等方案。"
+  },
+  {
+    "id": "fe-electron-002",
+    "category": "frontend",
+    "topic": "Electron",
+    "tags": ["electron", "安全", "ipc"],
+    "difficulty": "hard",
+    "question": "Electron 里主进程和渲染进程如何分工？为什么说随意开 nodeIntegration 有风险？",
+    "answer_outline": "主进程管窗口、系统菜单、托盘、自动更新和原生能力；渲染进程跑页面。二者用 IPC 通信。若渲染进程直接开 nodeIntegration，页面里的 XSS 就能拿到 Node/文件系统权限。正确做法是 contextIsolation + preload 暴露有限 API，远程内容当不可信，禁用危险开关。"
+  },
+  {
+    "id": "fe-babel-001",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["babel", "工程化", "转译", "兼容"],
+    "difficulty": "easy",
+    "question": "Babel 是做什么的？它解决前端工程里的什么问题？",
+    "answer_outline": "Babel 是 JS 编译器/转译器：把新语法（可选链、类字段、JSX 等）转成目标环境能跑的旧语法，也可配合 polyfill 补 API。它让你用现代语法写代码，同时兼容指定浏览器。注意：语法转换和 runtime polyfill 是两件事；和 TypeScript、SWC 的分工要说清谁负责类型、谁负责降级。"
+  },
+  {
+    "id": "fe-babel-002",
+    "category": "frontend",
+    "topic": "工程化",
+    "tags": ["babel", "browserslist", "工程化"],
+    "difficulty": "medium",
+    "question": "配置 Babel 时 browserslist / targets 影响什么？转得太猛或太保守分别有什么问题？",
+    "answer_outline": "targets 决定语法降到什么程度、要不要注入哪些 polyfill。目标过旧：产物更大、更慢。目标过新：老浏览器直接语法错误。应和真实用户分布对齐，并区分业务代码与 node_modules 的编译范围，避免全量编译拖慢构建。"
+  }
+]

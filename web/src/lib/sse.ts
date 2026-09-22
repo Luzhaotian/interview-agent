@@ -6,6 +6,7 @@ export type SseEvent = {
   detail?: string
   profile?: unknown
   question?: unknown
+  candidates?: unknown
   append?: boolean
   decision?: InterviewDecision
   name?: string
