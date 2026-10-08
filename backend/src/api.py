@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import threading
 import warnings
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Optional
+
+logger = logging.getLogger("interview-agent.api")
 
 warnings.filterwarnings("ignore", message=".*LibreSSL.*")
 warnings.filterwarnings("ignore", message=".*allowed_objects.*")
@@ -16,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from src.errors import AgentError
 from src.graph import (
     build_graph,
     iter_chat_events,
@@ -84,7 +88,7 @@ def chat(body: ChatBody) -> dict:
     context = body.context.strip()[:12000] or "（无）"
     try:
         reply = "".join(stream_chat_tokens(turns, context)).strip()
-    except SystemExit as exc:
+    except AgentError as exc:
         raise HTTPException(status_code=400, detail=_exit_message(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"回复失败：{exc}") from exc
@@ -119,10 +123,13 @@ def chat_stream(body: ChatBody) -> StreamingResponse:
                     count=count,
                 ):
                     on_event(payload)
-            except SystemExit as exc:
+            except AgentError as exc:
+                logger.warning("chat 业务错误：%s", exc)
                 on_event({"type": "error", "detail": _exit_message(exc)})
-            except Exception as exc:
-                on_event({"type": "error", "detail": f"回复失败：{exc}"})
+            except BaseException:
+                # 任何意外崩溃都要把原因推给前端并落日志，绝不能静默断流
+                logger.exception("chat 流式处理意外崩溃")
+                on_event({"type": "error", "detail": "服务内部错误，详见后端日志"})
             finally:
                 unbind_reasoning(token)
                 events_queue.put(None)
@@ -165,7 +172,7 @@ async def recommend(files: list[UploadFile] = File(...), count: int = Form(15)) 
                     "questions": [_public_question(item) for item in result["selected"]],
                 }
             )
-    except SystemExit as exc:
+    except AgentError as exc:
         raise HTTPException(status_code=400, detail=_exit_message(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"生成失败：{exc}") from exc
@@ -202,10 +209,23 @@ async def recommend_stream(
                         # 开场说明阶段关闭 reasoning 回调，避免模型草稿再次灌进「思考过程」
                         for piece in stream_intro_tokens(state["profile"], state["selected"]):
                             on_event({"type": "token", "text": piece})
-                    except SystemExit as exc:
+                    except AgentError as exc:
+                        logger.warning("recommend 业务错误（%s）：%s", name, exc)
                         on_event({"type": "error", "name": name, "detail": _exit_message(exc)})
-                    except Exception as exc:
-                        on_event({"type": "error", "name": name, "detail": f"生成失败：{exc}"})
+                    except BaseException:
+                        logger.exception("recommend 单份简历处理意外崩溃（%s）", name)
+                        on_event(
+                            {
+                                "type": "error",
+                                "name": name,
+                                "detail": "服务内部错误，详见后端日志",
+                            }
+                        )
+                events_queue.put({"type": "done"})
+            except BaseException:
+                # 兜底：任何情况下流都不能「无声结束」，error + done 必须发出去
+                logger.exception("recommend 流式处理意外崩溃")
+                events_queue.put({"type": "error", "detail": "服务内部错误，详见后端日志"})
                 events_queue.put({"type": "done"})
             finally:
                 _cleanup_paths([path for _, path in saved])
@@ -249,10 +269,22 @@ async def screen_stream(files: list[UploadFile] = File(...)) -> StreamingRespons
                     on_event({"type": "resume", "name": name, "index": index, "total": total})
                     try:
                         run_screen_stream(str(path), on_event=on_event)
-                    except SystemExit as exc:
+                    except AgentError as exc:
+                        logger.warning("screen 业务错误（%s）：%s", name, exc)
                         on_event({"type": "error", "name": name, "detail": _exit_message(exc)})
-                    except Exception as exc:
-                        on_event({"type": "error", "name": name, "detail": f"判断失败：{exc}"})
+                    except BaseException:
+                        logger.exception("screen 单份简历判断意外崩溃（%s）", name)
+                        on_event(
+                            {
+                                "type": "error",
+                                "name": name,
+                                "detail": "服务内部错误，详见后端日志",
+                            }
+                        )
+                events_queue.put({"type": "done"})
+            except BaseException:
+                logger.exception("screen 流式处理意外崩溃")
+                events_queue.put({"type": "error", "detail": "服务内部错误，详见后端日志"})
                 events_queue.put({"type": "done"})
             finally:
                 unbind_reasoning(token)
@@ -331,7 +363,7 @@ def _parse_chat_turns(body: ChatBody) -> list[tuple[str, str]]:
 def _questions_or_http() -> list[dict]:
     try:
         return load_index()
-    except SystemExit as exc:
+    except AgentError as exc:
         raise HTTPException(status_code=500, detail=_exit_message(exc)) from exc
 
 
@@ -348,7 +380,7 @@ def _public_kb_item(item: dict) -> dict:
 
 
 def _public_question(item: dict) -> dict:
-    from src.graph import _default_direction
+    from src.stages import default_direction
 
     stage = item.get("stage", "foundation")
     return {
@@ -359,7 +391,7 @@ def _public_question(item: dict) -> dict:
         "stage": stage,
         "question": item["question"],
         "reason": item.get("reason", ""),
-        "answer_direction": item.get("answer_direction") or _default_direction(item, stage),
+        "answer_direction": item.get("answer_direction") or default_direction(item, stage),
         "reference_answer": item.get("reference_answer") or item["answer_outline"],
         "answer_outline": item["answer_outline"],
         "source": item.get("source") or "kb",
@@ -372,7 +404,6 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _exit_message(exc: SystemExit) -> str:
-    if isinstance(exc.code, str) and exc.code:
-        return exc.code
-    return "请求失败"
+def _exit_message(exc: AgentError) -> str:
+    message = str(exc).strip()
+    return message or "请求失败"

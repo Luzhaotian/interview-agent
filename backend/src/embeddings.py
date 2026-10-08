@@ -18,6 +18,8 @@ from typing import Iterable
 
 import numpy as np
 
+from src.errors import AgentError
+
 # 国内访问 Hugging Face 常超时；neural 模式可走镜像
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
@@ -44,7 +46,11 @@ def embed_corpus(texts: Iterable[str]) -> np.ndarray:
     if hasattr(matrix, "toarray"):
         matrix = matrix.toarray()
     dump(pipe, VECTORIZER_PATH)
-    return _l2_normalize(np.asarray(matrix, dtype=np.float32))
+    invalidate_caches()
+    matrix = _l2_normalize(np.asarray(matrix, dtype=np.float32))
+    global _local_model_label
+    _local_model_label = f"tfidf-svd-char3-{matrix.shape[1]}"
+    return matrix
 
 
 def embed_query(text: str) -> np.ndarray:
@@ -55,12 +61,7 @@ def embed_query(text: str) -> np.ndarray:
         vectors = np.asarray(list(_neural_model().embed([cleaned])), dtype=np.float32)
         return _l2_normalize(vectors)[0]
 
-    from joblib import load
-
-    if not VECTORIZER_PATH.is_file():
-        raise SystemExit("缺少 data/vectorizer.joblib，请先运行 python main.py ingest")
-    pipe = load(VECTORIZER_PATH)
-    matrix = pipe.transform([cleaned])
+    matrix = _local_pipeline().transform([cleaned])
     if hasattr(matrix, "toarray"):
         matrix = matrix.toarray()
     return _l2_normalize(np.asarray(matrix, dtype=np.float32))[0]
@@ -69,8 +70,40 @@ def embed_query(text: str) -> np.ndarray:
 def cosine_scores(query: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     """query 与矩阵每行的余弦相似度。两侧已归一化时等于点积。"""
     q = _l2_normalize(query.reshape(1, -1))[0]
-    m = _l2_normalize(matrix)
-    return m @ q
+    return _cached_normalize(matrix) @ q
+
+
+@lru_cache(maxsize=1)
+def _local_pipeline():
+    """加载建库时的编码器。joblib.load 每次约 70ms，进程内缓存一份即可。"""
+    from joblib import load
+
+    if not VECTORIZER_PATH.is_file():
+        raise AgentError("缺少 data/vectorizer.joblib，请先运行 python main.py ingest")
+    return load(VECTORIZER_PATH)
+
+
+def invalidate_caches() -> None:
+    """ingest 重建向量/编码器后调用，避免进程内读到旧缓存。"""
+    global _normalize_memo
+    _local_pipeline.cache_clear()
+    load_embeddings.cache_clear()
+    _normalize_memo = None
+
+
+# load_embeddings 有缓存时矩阵是同一对象，按身份记一份归一化结果即可。
+# 必须持有源矩阵的强引用：只记 id() 的话，源矩阵被 GC 后 id 会被新矩阵复用，
+# 命中错误缓存导致 shape 不匹配。强引用在手，id 就不会被回收复用。
+_normalize_memo: tuple[np.ndarray, np.ndarray] | None = None
+
+
+def _cached_normalize(matrix: np.ndarray) -> np.ndarray:
+    global _normalize_memo
+    if _normalize_memo is not None and _normalize_memo[0] is matrix:
+        return _normalize_memo[1]
+    normalized = _l2_normalize(matrix)
+    _normalize_memo = (matrix, normalized)
+    return normalized
 
 
 def save_embeddings(ids: list[str], matrix: np.ndarray) -> None:
@@ -84,7 +117,13 @@ def save_embeddings(ids: list[str], matrix: np.ndarray) -> None:
     )
 
 
+@lru_cache(maxsize=1)
 def load_embeddings() -> tuple[list[str], np.ndarray, str, str] | None:
+    """读取 npz 并进程内缓存；一次请求原本会解压加载 3 次。
+
+    缓存按 (路径, mtime) 失效由 invalidate_caches() 在 ingest 后统一清掉；
+    外部直接改 npz 文件的场景（本机开发）重启服务即可。
+    """
     if not EMBEDDINGS_PATH.is_file():
         return None
     data = np.load(EMBEDDINGS_PATH, allow_pickle=True)
@@ -115,10 +154,14 @@ def active_backend() -> str:
     return _resolve_backend()
 
 
+# SVD 实际输出维度是 min(n_components, 题目数)，不能写死 256（题少时会被戳穿）
+_local_model_label = "tfidf-svd-char3"
+
+
 def _model_label() -> str:
     if _resolve_backend() == "neural":
         return MODEL_NAME
-    return "tfidf-svd-char3-256"
+    return _local_model_label
 
 
 @lru_cache(maxsize=1)

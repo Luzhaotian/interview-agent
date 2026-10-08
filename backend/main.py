@@ -7,6 +7,9 @@ from pathlib import Path
 warnings.filterwarnings("ignore", message=".*LibreSSL.*")
 warnings.filterwarnings("ignore", message=".*allowed_objects.*")
 
+import sys
+
+from src.errors import AgentError
 from src.graph import build_graph
 from src.kb import ingest
 from src.llm import question_count
@@ -35,25 +38,30 @@ def main() -> None:
         uvicorn.run(app, host=args.host, port=args.port)
         return
 
-    if args.command == "ingest":
-        questions = ingest()
-        counts = _count_by_category(questions)
-        print(
-            f"已索引 {len(questions)} 道题（含向量）："
-            f"前端 {counts.get('frontend', 0)}，"
-            f"Agent {counts.get('agent', 0)}，"
-            f"后端 {counts.get('backend', 0)}"
-        )
-        return
+    try:
+        if args.command == "ingest":
+            questions = ingest()
+            counts = _count_by_category(questions)
+            print(
+                f"已索引 {len(questions)} 道题（含向量）："
+                f"前端 {counts.get('frontend', 0)}，"
+                f"Agent {counts.get('agent', 0)}，"
+                f"后端 {counts.get('backend', 0)}"
+            )
+            return
 
-    result = build_graph().invoke(
-        {
-            "resume_path": str(Path(args.resume).expanduser().resolve()),
-            "question_count": question_count(args.count),
-        }
-    )
-    print(result["report"])
-    print(f"报告已写入 {result['report_path']}")
+        result = build_graph().invoke(
+            {
+                "resume_path": str(Path(args.resume).expanduser().resolve()),
+                "question_count": question_count(args.count),
+            }
+        )
+        print(result["report"])
+        print(f"报告已写入 {result['report_path']}")
+    except AgentError as exc:
+        # 可预期的业务错误：打印人话并以非零码退出，不甩 traceback
+        print(f"错误：{exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 def _count_by_category(questions: list[dict]) -> dict[str, int]:

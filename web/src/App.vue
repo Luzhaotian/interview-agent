@@ -89,7 +89,6 @@ onMounted(() => {
       <button
         type="button"
         class="mt-3 flex h-8 w-full items-center justify-center gap-1 rounded-lg border border-dashed border-[rgba(255,255,255,0.28)] bg-[rgba(255,255,255,0.06)] px-2 text-[13px] [font-weight:650] text-inherit hover:bg-[rgba(255,255,255,0.12)]"
-        :disabled="chat.sending"
         @click="chat.createNewThread()"
       >
         <span class="text-[15px] leading-none" aria-hidden="true">+</span>
@@ -107,18 +106,26 @@ onMounted(() => {
           class="group flex w-full items-center self-start gap-1 rounded-lg border-0 bg-transparent px-2 py-1.5 text-left text-inherit hover:bg-[rgba(255,255,255,0.08)] data-[active=true]:bg-[rgba(255,255,255,0.14)]"
           role="listitem"
           :data-active="thread.id === chat.activeId"
-          :disabled="chat.sending"
           @click="chat.selectThread(thread.id)"
         >
           <span class="grid flex-1 min-w-0 gap-px">
-            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-semibold leading-[1.25]">{{
-              thread.title
-            }}</span>
+            <span
+              class="flex items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-semibold leading-[1.25]"
+            >
+              <!-- 生成中的会话：呼吸点提示，切换回来可继续看流式输出 -->
+              <span
+                v-if="chat.sendingIds.has(thread.id)"
+                class="size-1.5 flex-none animate-pulse rounded-full bg-[#9ef0d4]"
+                aria-label="生成中"
+              />
+              <span class="overflow-hidden text-ellipsis whitespace-nowrap">{{ thread.title }}</span>
+            </span>
             <span class="text-[11px] leading-[1.2] text-[rgba(244,250,248,0.5)]">
               {{ thread.messages.length }} 条 · {{ formatTime(thread.updatedAt) }}
             </span>
           </span>
           <span
+            v-if="!chat.sendingIds.has(thread.id)"
             class="hidden size-5 flex-none place-items-center rounded-md text-[14px] text-[rgba(244,250,248,0.7)] group-hover:grid group-data-[active=true]:grid hover:bg-[rgba(255,255,255,0.12)] hover:text-white"
             title="删除"
             @click.stop="chat.removeThread(thread.id)"

@@ -1,0 +1,4 @@
+# 仅 Cursor 里手动调用 interview-web MCP 服务时需要（backend/mcp_server.py）。
+# 要求 Python 3.10+；网页出题走进程内联网检索，不依赖这份。
+-r requirements.txt
+mcp>=2.2.0,<3

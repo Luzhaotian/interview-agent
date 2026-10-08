@@ -33,7 +33,9 @@ backend/
 ├── data/embeddings.npz     # ingest 生成的题向量，已忽略提交
 ├── output/questions.md     # 推荐结果
 ├── .env.example
-└── requirements.txt
+├── requirements.txt        # 核心依赖（Python 3.9+）
+├── requirements-mcp.txt    # MCP 服务额外依赖 mcp（Python 3.10+）
+└── requirements-dev.txt    # 跑测试用（pytest）
 ```
 
 种子题大约为：前端 120、Agent 45、后端 50。
@@ -182,7 +184,7 @@ difficulty: medium
 
 DeepSeek 只有对话接口，没有 embedding，所以向量在本机做，**不依赖向量数据库**。
 
-1. **默认 backend=`local`**：`TF-IDF（字级 n-gram）→ TruncatedSVD(256)` 得到稠密向量，写入 `data/embeddings.npz`，编码器写入 `data/vectorizer.joblib`。纯本机，适合对照余弦公式学习。
+1. **默认 backend=`local`**：`TF-IDF（字级 n-gram）→ TruncatedSVD` 得到稠密向量（目标 256 维，题量不足时实际维度为 `min(256, 题数)`），写入 `data/embeddings.npz`，编码器写入 `data/vectorizer.joblib`。纯本机，适合对照余弦公式学习。
 2. **可选 backend=`neural`**：环境变量 `EMBEDDING_BACKEND=neural`，用 `fastembed` 加载 `BAAI/bge-small-zh-v1.5`（语义向量；首次需下载，默认走 `HF_ENDPOINT` 镜像）。
 3. **查询**：简历 skills / projects / summary / focus → 查询向量，与题库矩阵做**余弦相似度**（向量已 L2 归一化，点积即可）。
 4. **重排**：相似度 × 分类权重 + 技能标签重合加分，再按 focus 优先取约 40 道候选。

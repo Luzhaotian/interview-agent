@@ -55,14 +55,25 @@ export async function readSse(
       const chunks = buffer.split('\n\n')
       buffer = chunks.pop() || ''
       for (const chunk of chunks) {
-        const line = chunk
+        // SSE 规范里一个事件可能有多行 data:，需按出现顺序拼接
+        const dataLines = chunk
           .split('\n')
           .map((part) => part.trim())
-          .find((part) => part.startsWith('data:'))
-        if (!line) continue
-        const raw = line.slice(5).trim()
+          .filter((part) => part.startsWith('data:'))
+        if (!dataLines.length) continue
+        const raw = dataLines
+          .map((line) => line.slice(5).trim())
+          .filter(Boolean)
+          .join('\n')
         if (!raw) continue
-        onEvent(JSON.parse(raw) as SseEvent)
+        let event: SseEvent
+        try {
+          event = JSON.parse(raw) as SseEvent
+        } catch {
+          // 畸形/被截断的分片：跳过这一块，别让整条流断掉
+          continue
+        }
+        onEvent(event)
       }
     }
   } finally {
@@ -75,4 +86,23 @@ export function isAbortError(error: unknown) {
     (error instanceof DOMException && error.name === 'AbortError') ||
     (error instanceof Error && error.name === 'AbortError')
   )
+}
+
+/**
+ * 追踪流是否收到后端的 done 事件。
+ * 后端 worker 崩溃/进程重启/代理断链时，连接会「正常关闭」但永远等不到 done；
+ * 没有这个检查，前端会把截断的流当成成功收尾，用户只看到内容戛然而止、无报错。
+ */
+export function createDoneTracker() {
+  let done = false
+  return {
+    mark(event: SseEvent) {
+      if (event.type === 'done') done = true
+    },
+    assert() {
+      if (!done) {
+        throw new Error('连接中断：本次生成未正常结束（后端可能重启或网络断开），请重试')
+      }
+    },
+  }
 }

@@ -34,7 +34,7 @@ interview-agent/
 
 ## 准备
 
-- Python 3.9 或以上
+- Python 3.9 或以上（核心服务）；仅用 Cursor 里的 MCP 联网查题服务时需要 3.10+
 - Node.js 26（根目录 `.nvmrc`；本机 shell 用 nvm 切换）
 - DeepSeek API Key。只建索引可以不填；生成题目必须填
 
@@ -107,7 +107,7 @@ python main.py recommend resumes/你的简历.md --count 12
 
 上传简历出题时，先抽画像并检索本地知识库。若某项技能几乎没有对应题，推荐流程会直接调用 `search_interview_questions` 补候选，再选题。这是进程内函数调用，不读 `.cursor/mcp.json`。查到的题不写入本地知识库，页面会标成「联网」。
 
-同一套检索另有一个 MCP 服务 `interview-web`（`backend/mcp_server.py`），只给 Cursor 对话里手动调用。`.cursor/mcp.json` 仅在这种情况下有用，网页出题不依赖它。依赖见 `backend/requirements.txt` 的 `mcp`。
+同一套检索另有一个 MCP 服务 `interview-web`（`backend/mcp_server.py`），只给 Cursor 对话里手动调用。`.cursor/mcp.json` 仅在这种情况下有用，网页出题不依赖它。该服务依赖 `mcp`（要求 Python 3.10+），单独放在 `backend/requirements-mcp.txt`，用 `pip install -r backend/requirements-mcp.txt` 安装。
 
 ## 更多
 

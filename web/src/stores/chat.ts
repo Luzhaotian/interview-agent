@@ -2,8 +2,11 @@ import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
 import type { ChatMessage, Profile } from '@/lib/transcript'
+import { uid } from '@/lib/uid'
 
 const STORAGE_KEY = 'interview-agent.chats.v1'
+/** 只持久化最近这么多会话，避免 localStorage 无限增长撑爆配额。 */
+const MAX_PERSISTED_THREADS = 30
 
 export type LongTermMemory = {
   focus: string
@@ -44,7 +47,7 @@ function emptyMemory(): LongTermMemory {
 function createThread(title = '新对话'): ChatThread {
   const now = Date.now()
   return {
-    id: crypto.randomUUID(),
+    id: uid(),
     title,
     messages: [],
     createdAt: now,
@@ -78,7 +81,7 @@ function loadState(): PersistedState {
         })),
       })),
       activeId: parsed.activeId || firstId,
-      memory: { ...emptyMemory(), ...(parsed.memory || {}) },
+      memory: { ...emptyMemory(), ...parsed.memory },
     }
   } catch {
     const thread = createThread()
@@ -110,8 +113,12 @@ export const useChatStore = defineStore('chat', () => {
   const threads = ref<ChatThread[]>(initial.threads)
   const activeId = ref(initial.activeId)
   const memory = ref<LongTermMemory>(initial.memory)
-  const sending = ref(false)
+  /** 正在流式生成的线程 id。按线程隔离后，生成中也可以自由切换/新建对话。 */
+  const sendingIds = ref(new Set<string>())
   const memoryOpen = ref(false)
+
+  const sending = computed(() => sendingIds.value.has(activeId.value))
+  const anySending = computed(() => sendingIds.value.size > 0)
 
   const activeThread = computed(
     () => threads.value.find((item) => item.id === activeId.value) || threads.value[0],
@@ -134,40 +141,61 @@ export const useChatStore = defineStore('chat', () => {
   const hasMemory = computed(() => memoryLines(memory.value).length > 0)
 
   watch(
-    [threads, activeId, memory, sending],
+    [threads, activeId, memory, sendingIds],
     () => {
-      // 流式打字过程中不要同步写 localStorage，否则会把渲染拖成整段蹦出来
-      if (sending.value) return
-      const payload: PersistedState = {
-        threads: threads.value.map((thread) => ({
-          ...thread,
-          messages: thread.messages.map((message) => ({
-            ...message,
-            streaming: false,
-          })),
-        })),
-        activeId: activeId.value,
-        memory: memory.value,
-      }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+      // 流式打字过程中不要同步写 localStorage，否则会把渲染拖成整段蹦出来；
+      // sendingIds 在 beginSend/endSend 时整体替换，能触发本 watch，
+      // 生成结束（集合清空）后 anySending 转 false，这里补写一次最终态。
+      if (anySending.value) return
+      persist()
     },
     { deep: true },
   )
 
+  function buildPayload(keepReasoning: boolean): PersistedState {
+    const sorted = [...threads.value].sort((a, b) => b.updatedAt - a.updatedAt)
+    return {
+      threads: sorted.slice(0, MAX_PERSISTED_THREADS).map((thread) => ({
+        ...thread,
+        messages: thread.messages.map((message) => ({
+          ...message,
+          streaming: false,
+          // 配额吃紧时丢掉体积最大、又最不影响回顾的思考草稿
+          ...(keepReasoning ? {} : { reasoning: '', thinking: [] }),
+        })),
+      })),
+      activeId: activeId.value,
+      memory: memory.value,
+    }
+  }
+
+  function persist() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPayload(true)))
+    } catch {
+      // 配额溢出（会话/思考文本太多）：先瘦身重写，仍失败就放弃这次持久化，
+      // 但不能让异常冒到 deep watch 里，否则每次变更都抛错、持久化整体失效。
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPayload(false)))
+      } catch {
+        // 彻底写不下就算了，内存态仍在，不影响当前使用
+      }
+    }
+  }
+
   function selectThread(id: string) {
-    if (sending.value) return
     if (threads.value.some((item) => item.id === id)) activeId.value = id
   }
 
   function createNewThread() {
-    if (sending.value) return
     const thread = createThread()
     threads.value = [thread, ...threads.value]
     activeId.value = thread.id
   }
 
   function removeThread(id: string) {
-    if (sending.value) return
+    // 正在生成的线程不能删：流事件还要往里面写
+    if (sendingIds.value.has(id)) return
     if (threads.value.length <= 1) {
       const thread = createThread()
       threads.value = [thread]
@@ -179,6 +207,41 @@ export const useChatStore = defineStore('chat', () => {
       const next = threads.value[0]
       activeId.value = next ? next.id : createThread().id
     }
+  }
+
+  function beginSend(threadId: string) {
+    sendingIds.value = new Set(sendingIds.value).add(threadId)
+  }
+
+  function endSend(threadId: string) {
+    const next = new Set(sendingIds.value)
+    next.delete(threadId)
+    sendingIds.value = next
+  }
+
+  function threadOf(threadId: string) {
+    return threads.value.find((item) => item.id === threadId)
+  }
+
+  /** 按线程 id 追加消息；流式期间用户可能已切走，不能再依赖 activeThread。 */
+  function addMessage(threadId: string, message: ChatMessage) {
+    const thread = threadOf(threadId)
+    if (!thread) return
+    thread.messages.push(message)
+    thread.updatedAt = Date.now()
+    if (thread.title === '新对话' || thread.title.startsWith('简历 ·')) {
+      thread.title = previewTitle(thread.messages)
+    }
+  }
+
+  /** 按线程 id + 消息 id 定位并更新，找不到就静默跳过（线程可能已被删）。 */
+  function updateMessage(threadId: string, messageId: string, updater: (message: ChatMessage) => void) {
+    const message = threadOf(threadId)?.messages.find((item) => item.id === messageId)
+    if (message) updater(message)
+  }
+
+  function isSending(threadId: string) {
+    return sendingIds.value.has(threadId)
   }
 
   function touchActive(titleHint?: string) {
@@ -222,9 +285,17 @@ export const useChatStore = defineStore('chat', () => {
     hasMemory,
     memoryOpen,
     sending,
+    anySending,
+    sendingIds,
     selectThread,
     createNewThread,
     removeThread,
+    beginSend,
+    endSend,
+    addMessage,
+    updateMessage,
+    isSending,
+    threadOf,
     touchActive,
     mergeMemoryFromProfile,
     updateMemoryNotes,

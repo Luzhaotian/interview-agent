@@ -5,6 +5,19 @@ import re
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
+
+# 不同领域的检索词，避免后端/Agent 简历也拿「前端开发」去搜
+DOMAIN_QUERY = {
+    "frontend": "前端开发",
+    "backend": "后端开发",
+    "agent": "AI Agent 大模型应用开发",
+}
+DOMAIN_KEYWORDS = {
+    "frontend": ("前端", "javascript", "js", "vue", "react", "css", "html", "typescript"),
+    "backend": ("后端", "java", "go", "python", "mysql", "redis", "分布式", "并发", "数据库", "服务端"),
+    "agent": ("agent", "llm", "rag", "langchain", "langgraph", "大模型", "向量", "prompt", "智能体"),
+}
 
 HEADERS = {
     "User-Agent": (
@@ -151,26 +164,33 @@ PREFERRED_HOSTS = (
 )
 
 
-def search_interview_questions(topic: str, limit: int = 8) -> str:
+def search_interview_questions(topic: str, limit: int = 8, domain: str = "frontend") -> str:
     topic = (topic or "").strip()
     if not topic:
         return "请提供要查询的技术主题，例如 Vue3 响应式、MySQL 索引。"
     limit = max(1, min(12, int(limit)))
-    payload = search_interview_questions_payload(topic, limit)
+    payload = search_interview_questions_payload(topic, limit, domain)
     if not payload["questions"] and not payload["hits"]:
         return f"没有搜到和「{payload['query']}」相关的公开页面。"
     return _format(payload["query"], payload["questions"], payload["hits"][:6])
 
 
-def search_interview_questions_payload(topic: str, limit: int = 8) -> dict:
-    """结构化联网检索，供推荐流程与 MCP 工具共用。"""
+def search_interview_questions_payload(topic: str, limit: int = 8, domain: str = "frontend") -> dict:
+    """结构化联网检索，供推荐流程与 MCP 工具共用。
+
+    domain 取 frontend / backend / agent，决定搜索词里的领域限定；
+    缺省按 frontend，保证旧调用方（MCP 工具）行为不变。
+    """
     topic = (topic or "").strip()
     limit = max(1, min(12, int(limit or 8)))
     if not topic:
         return {"query": "", "questions": [], "hits": []}
 
+    domain = (domain or "frontend").strip().lower()
+    if domain not in DOMAIN_QUERY:
+        domain = "frontend"
     search_topic = _search_topic(topic)
-    query = f"{search_topic} 前端开发 面试题"
+    query = f"{search_topic} {DOMAIN_QUERY[domain]} 面试题"
     try:
         hits = _merge(
             _search_bing(query),
@@ -183,8 +203,8 @@ def search_interview_questions_payload(topic: str, limit: int = 8) -> dict:
         return {"query": query, "questions": [], "hits": []}
 
     # 只要看起来像面试/技术文章的页面；绝不打开汽车站等
-    pages = [hit for hit in hits if _looks_like_interview_page(hit, topic)]
-    questions = _collect_questions(pages[:5] or hits[:3], topic, limit)
+    pages = [hit for hit in hits if _looks_like_interview_page(hit, topic, domain)]
+    questions = _collect_questions(pages[:5] or hits[:3], topic, limit, domain)
     return {"query": query, "questions": questions, "hits": hits}
 
 
@@ -276,24 +296,25 @@ def _rank(hits: list[dict], topic: str) -> list[dict]:
     return sorted(hits, key=score, reverse=True)
 
 
-def _looks_like_interview_page(hit: dict, topic: str) -> bool:
+def _looks_like_interview_page(hit: dict, topic: str, domain: str = "frontend") -> bool:
     blob = f"{hit['title']} {hit['snippet']}".lower()
     if any(word in blob for word in ("蔚来", "汽车之家", "车型", "报价")):
         return False
     if "面试" in blob:
         return True
     topic_l = topic.lower()
-    if topic_l and topic_l in blob and any(w in blob for w in ("前端", "javascript", "js", "vue", "react", "css", "html")):
+    keywords = DOMAIN_KEYWORDS.get(domain, DOMAIN_KEYWORDS["frontend"])
+    if topic_l and topic_l in blob and any(w in blob for w in keywords):
         return True
     host = hit.get("host") or ""
     return any(host.endswith(pref) or host == pref for pref in PREFERRED_HOSTS[:8])
 
 
-def _collect_questions(hits: list[dict], topic: str, limit: int) -> list[dict]:
+def _collect_questions(hits: list[dict], topic: str, limit: int, domain: str = "frontend") -> list[dict]:
     found: list[dict] = []
     seen: set[str] = set()
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(_fetch_questions, hit["url"], topic): hit for hit in hits}
+        futures = {pool.submit(_fetch_questions, hit["url"], topic, domain): hit for hit in hits}
         try:
             for future in as_completed(futures, timeout=18):
                 hit = futures[future]
@@ -309,12 +330,13 @@ def _collect_questions(hits: list[dict], topic: str, limit: int) -> list[dict]:
                     found.append({"question": line, "title": hit["title"], "url": hit["url"]})
                     if len(found) >= limit:
                         return found
-        except TimeoutError:
+        except (TimeoutError, FuturesTimeoutError):
+            # 整批超时：返回已抓到的部分，让上层降级用知识库候选继续
             return found
     return found
 
 
-def _fetch_questions(url: str, topic: str) -> list[str]:
+def _fetch_questions(url: str, topic: str, domain: str = "frontend") -> list[str]:
     request = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(request, timeout=8) as response:
         content_type = response.headers.get("Content-Type", "")
@@ -334,7 +356,7 @@ def _fetch_questions(url: str, topic: str) -> list[str]:
     for pattern in patterns:
         for match in re.findall(pattern, text):
             line = _clean(match if isinstance(match, str) else match)
-            if not _is_interview_question(line, topic):
+            if not _is_interview_question(line, topic, domain):
                 continue
             if line not in questions:
                 questions.append(line)
@@ -343,7 +365,7 @@ def _fetch_questions(url: str, topic: str) -> list[str]:
     return questions
 
 
-def _is_interview_question(line: str, topic: str) -> bool:
+def _is_interview_question(line: str, topic: str, domain: str = "frontend") -> bool:
     if len(line) < 8 or len(line) > 120:
         return False
     lower = line.lower()
@@ -365,14 +387,16 @@ def _is_interview_question(line: str, topic: str) -> bool:
 
     has_hint = any(hint.lower() in lower or hint in line for hint in INTERVIEW_HINTS)
     has_topic = any(token in lower for token in topic_tokens)
+    # 非前端领域补一条领域词命中，避免 backend/agent 题因前端向话术不匹配被误杀
+    has_domain = any(w in lower for w in DOMAIN_KEYWORDS.get(domain, ()))
     # ES6 特例：必须沾 JavaScript / 前端语义，防止汽车页漏网
     if topic_key in {"es6", "es2015", "es7", "es8"}:
         if not any(w in lower for w in ("js", "javascript", "ecmascript", "前端", "变量", "promise", "箭头", "解构", "模块")):
             if not has_hint:
                 return False
 
-    # 至少：面试话术提示，或题干里出现主题词
-    if not (has_hint or has_topic):
+    # 至少：面试话术提示，或题干里出现主题词 / 领域词
+    if not (has_hint or has_topic or has_domain):
         return False
     return True
 

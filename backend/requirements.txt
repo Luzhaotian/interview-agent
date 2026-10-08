@@ -1,6 +1,8 @@
+# 核心运行依赖（Python 3.9+）。
+# MCP 联网查题服务（backend/mcp_server.py）另需 mcp，见 requirements-mcp.txt——
+# 它要求 Python 3.10+，所以不放进核心依赖，避免 3.9 环境整份装不上。
 langgraph>=0.2.60
-langchain-openai>=0.3.0
-langchain-core>=0.3.0
+openai>=1.40.0
 pypdf>=5.0.0
 python-docx>=1.1.0
 jieba>=0.42.1
@@ -13,4 +15,3 @@ pydantic>=2.0.0
 fastapi>=0.115.0
 uvicorn>=0.32.0
 python-multipart>=0.0.9
-mcp>=2.2.0,<3

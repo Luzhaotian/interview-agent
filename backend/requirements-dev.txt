@@ -1,0 +1,3 @@
+# 跑 backend/tests 用。装法：pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8.0.0

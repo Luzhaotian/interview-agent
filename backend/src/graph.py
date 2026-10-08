@@ -8,45 +8,27 @@ from typing import Callable, Iterator, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from src.errors import AgentError
 from src.kb import find_skill_gaps, load_index, retrieve
 from src.llm import bind_reasoning, complete_text, iter_model, question_count, unbind_reasoning
 from src.resume import read_resume
 from src.rules import gate_playbook, playbook_block
+from src.stages import (
+    LABELS,
+    STAGES,
+    STAGE_RANK,
+    balance_and_sort,
+    default_direction,
+    infer_stage,
+    normalize_stage,
+    order_selected,
+    parse_years,
+    stage_quotas,
+)
 from src.web_questions import search_interview_questions_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATH = ROOT / "output" / "questions.md"
-LABELS = {
-    "frontend": "前端",
-    "agent": "Agent",
-    "backend": "后端",
-    "easy": "简单",
-    "medium": "中等",
-    "hard": "困难",
-    "foundation": "基础",
-    "framework": "框架",
-    "architecture": "架构经验",
-    "experience": "过往经历",
-}
-STAGES = ("foundation", "framework", "architecture", "experience")
-STAGE_RANK = {name: index for index, name in enumerate(STAGES)}
-FRAMEWORK_HINTS = ("vue", "react", "pinia", "hooks", "typescript", "vite", "webpack", "langgraph", "langchain")
-ARCHITECTURE_HINTS = (
-    "性能",
-    "工程化",
-    "架构",
-    "缓存",
-    "分布式",
-    "一致性",
-    "监控",
-    "部署",
-    "安全",
-    "ssr",
-    "微前端",
-    "可观测",
-    "熔断",
-    "消息队列",
-)
 
 
 class InterviewState(TypedDict, total=False):
@@ -82,7 +64,7 @@ def parse_profile(state: InterviewState) -> dict:
     raw = complete_text(prompt)
     profile = _load_json(str(raw))
     if not isinstance(profile, dict):
-        raise SystemExit("模型没有返回简历画像 JSON")
+        raise AgentError("模型没有返回简历画像 JSON")
     focus = profile.get("focus")
     if focus not in {"frontend", "backend", "agent"}:
         profile["focus"] = "frontend"
@@ -97,7 +79,7 @@ def retrieve_kb(state: InterviewState) -> dict:
     questions = load_index()
     candidates = retrieve(state["profile"], questions, limit=40)
     if len(candidates) < 10:
-        raise SystemExit("知识库候选题不足 10 道，请先运行 python main.py ingest")
+        raise AgentError("知识库候选题不足 10 道，请先运行 python main.py ingest")
     gaps = find_skill_gaps(state["profile"], questions, max_gaps=3)
     return {"candidates": candidates, "kb_gaps": gaps}
 
@@ -112,7 +94,11 @@ def fill_gaps_via_mcp(state: InterviewState) -> dict:
     web_candidates: list[dict] = []
     seen_questions: set[str] = set()
     for topic in gaps:
-        payload = search_interview_questions_payload(topic, limit=4)
+        # 联网补题只是锦上添花：单个主题抓失败就跳过，仍用知识库候选继续
+        try:
+            payload = search_interview_questions_payload(topic, limit=4, domain=focus)
+        except Exception:
+            continue
         for index, item in enumerate(payload.get("questions") or []):
             question = str(item.get("question") or "").strip()
             key = re.sub(r"\s+", "", question)
@@ -154,9 +140,9 @@ def fill_gaps_via_mcp(state: InterviewState) -> dict:
 def select_questions(state: InterviewState) -> dict:
     count = state.get("question_count") or question_count()
     profile = state["profile"]
-    years = _parse_years(str(profile.get("years") or ""))
+    years = parse_years(str(profile.get("years") or ""))
     junior = years is None or years <= 5
-    quotas = _stage_quotas(count, junior)
+    quotas = stage_quotas(count, junior)
     brief = [
         {
             "id": item["id"],
@@ -206,16 +192,16 @@ def select_questions(state: InterviewState) -> dict:
                 continue
             used.add(qid)
             base = by_id[qid]
-            stage = _normalize_stage(item.get("stage"), base, str(item.get("reason") or ""))
+            stage = normalize_stage(item.get("stage"), base, str(item.get("reason") or ""))
             if stage == "experience":
-                stage = _infer_stage(base, str(item.get("reason") or ""))
+                stage = infer_stage(base, str(item.get("reason") or ""))
             selected.append(
                 {
                     **base,
                     "stage": stage,
                     "reason": str(item.get("reason") or "与简历技能匹配"),
                     "answer_direction": str(item.get("answer_direction") or "").strip()
-                    or _default_direction(base, stage),
+                    or default_direction(base, stage),
                     "reference_answer": base["answer_outline"],
                 }
             )
@@ -223,27 +209,27 @@ def select_questions(state: InterviewState) -> dict:
     for item in state["candidates"]:
         if item["id"] in used:
             continue
-        stage = _infer_stage(item, "")
+        stage = infer_stage(item, "")
         selected.append(
             {
                 **item,
                 "stage": stage,
                 "reason": "检索结果与简历技能标签匹配",
-                "answer_direction": _default_direction(item, stage),
+                "answer_direction": default_direction(item, stage),
                 "reference_answer": item["answer_outline"],
             }
         )
     kb_selected = [item for item in selected if item.get("stage") != "experience"]
     if len(kb_selected) < 8:
-        raise SystemExit("有效题目不足，请检查模型是否返回了候选题 id")
+        raise AgentError("有效题目不足，请检查模型是否返回了候选题 id")
 
-    balanced = _balance_and_sort(kb_selected, quotas, str(profile.get("focus") or "frontend"), junior)
+    balanced = balance_and_sort(kb_selected, quotas, str(profile.get("focus") or "frontend"), junior)
     experience = _draft_experience_questions(
         profile,
         state.get("resume_text") or "",
         quotas["experience"],
     )
-    ordered = _order_selected([*balanced, *experience], str(profile.get("focus") or "frontend"))
+    ordered = order_selected([*balanced, *experience], str(profile.get("focus") or "frontend"))
     return {"selected": ordered[:count]}
 
 
@@ -273,7 +259,7 @@ def write_report(state: InterviewState) -> dict:
                 "",
                 f"**为什么问：** {item['reason']}",
                 "",
-                f"**回答方向：** {item.get('answer_direction') or _default_direction(item, item.get('stage', 'foundation'))}",
+                f"**回答方向：** {item.get('answer_direction') or default_direction(item, item.get('stage', 'foundation'))}",
                 "",
                 f"**参考答案：** {item.get('reference_answer') or item['answer_outline']}",
                 "",
@@ -543,6 +529,16 @@ def _classify_chat_intent(text: str) -> str:
         "再选",
         "出几道",
         "来几道",
+        # 「换一批题 / 重新出 / 另外来几道」这类说法此前会漏到普通聊天分支，
+        # 而聊天分支又被禁止罗列新题，体验很怪。子串匹配，短词即可覆盖长说法。
+        "换一批",
+        "换题",
+        "换几道",
+        "重新出",
+        "重新推荐",
+        "重新选",
+        "另外出",
+        "另外来",
     )
     probe_hints = ("追问", "围绕", "深挖", "展开问", "继续问", "怎么追问", "面试官追问")
     if any(hint in value for hint in ("可约面试", "是否可以面试", "是否进入", "推荐面试", "不推荐面试")):
@@ -571,7 +567,7 @@ def _normalize_profile(profile: dict | None) -> dict:
 def _select_more_questions(profile: dict, excluded: set[str], count: int) -> list[dict]:
     try:
         bank = load_index()
-    except SystemExit:
+    except AgentError:
         return []
     candidates = [
         item
@@ -580,10 +576,10 @@ def _select_more_questions(profile: dict, excluded: set[str], count: int) -> lis
     ]
     if len(candidates) < 3:
         return []
-    years = _parse_years(str(profile.get("years") or ""))
+    years = parse_years(str(profile.get("years") or ""))
     junior = years is None or years <= 5
     # 补充题不含经历配额，经历仍按简历另出
-    quotas = _stage_quotas(count + 2, junior)
+    quotas = stage_quotas(count + 2, junior)
     experience_n = min(2, quotas.get("experience", 0))
     kb_quotas = {
         "foundation": quotas["foundation"],
@@ -629,16 +625,16 @@ def _select_more_questions(profile: dict, excluded: set[str], count: int) -> lis
                 continue
             used.add(qid)
             base = by_id[qid]
-            stage = _normalize_stage(item.get("stage"), base, str(item.get("reason") or ""))
+            stage = normalize_stage(item.get("stage"), base, str(item.get("reason") or ""))
             if stage == "experience":
-                stage = _infer_stage(base, "")
+                stage = infer_stage(base, "")
             selected.append(
                 {
                     **base,
                     "stage": stage,
                     "reason": str(item.get("reason") or "补充与简历相关的题目"),
                     "answer_direction": str(item.get("answer_direction") or "").strip()
-                    or _default_direction(base, stage),
+                    or default_direction(base, stage),
                     "reference_answer": base["answer_outline"],
                     "source": base.get("source") or "kb",
                 }
@@ -650,23 +646,23 @@ def _select_more_questions(profile: dict, excluded: set[str], count: int) -> lis
             break
         if item["id"] in used:
             continue
-        stage = _infer_stage(item, "")
+        stage = infer_stage(item, "")
         selected.append(
             {
                 **item,
                 "stage": stage,
                 "reason": "补充题库中与简历匹配的题目",
-                "answer_direction": _default_direction(item, stage),
+                "answer_direction": default_direction(item, stage),
                 "reference_answer": item["answer_outline"],
                 "source": item.get("source") or "kb",
             }
         )
-    balanced = _balance_and_sort(selected, kb_quotas, str(profile.get("focus") or "frontend"), junior)
+    balanced = balance_and_sort(selected, kb_quotas, str(profile.get("focus") or "frontend"), junior)
     experience = _draft_experience_questions(profile, "", experience_n) if experience_n else []
     # 经历题 id 避开已用
     for index, item in enumerate(experience, start=1):
         item["id"] = f"resume-exp-more-{index}"
-    return _order_selected([*balanced, *experience], str(profile.get("focus") or "frontend"))[:count]
+    return order_selected([*balanced, *experience], str(profile.get("focus") or "frontend"))[:count]
 
 
 def _draft_probe_questions(profile: dict, context: str, user_text: str, count: int) -> list[dict]:
@@ -713,14 +709,14 @@ def _draft_probe_questions(profile: dict, context: str, user_text: str, count: i
                 "stage": stage,
                 "reason": str(item.get("reason") or "围绕已选题继续追问").strip(),
                 "answer_direction": str(item.get("answer_direction") or "").strip()
-                or _default_direction({"topic": "追问"}, stage),
+                or default_direction({"topic": "追问"}, stage),
                 "reference_answer": reference,
                 "source": "probe",
             }
         )
         if len(packed) >= count:
             break
-    return _order_selected(packed, focus)
+    return order_selected(packed, focus)
 
 
 def _stream_more_intro(profile: dict, questions: list[dict], probe: bool = False) -> Iterator[str]:
@@ -746,7 +742,7 @@ def _public_selected(item: dict) -> dict:
         "question": item["question"],
         "reason": item.get("reason", ""),
         "answer_direction": item.get("answer_direction")
-        or _default_direction(item, item.get("stage", "foundation")),
+        or default_direction(item, item.get("stage", "foundation")),
         "reference_answer": item.get("reference_answer") or item["answer_outline"],
         "answer_outline": item["answer_outline"],
         "source": item.get("source") or "kb",
@@ -783,83 +779,6 @@ def _write_web_inbox(candidates: list[dict]) -> None:
     )
     latest = folder / "web-inbox-latest.json"
     latest.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-
-
-def _normalize_stage(raw, item: dict, reason: str) -> str:
-    stage = str(raw or "").strip().lower()
-    if stage in STAGE_RANK:
-        return stage
-    return _infer_stage(item, reason)
-
-
-def _infer_stage(item: dict, reason: str) -> str:
-    blob = " ".join(
-        [
-            item.get("topic", ""),
-            " ".join(item.get("tags") or []),
-            item.get("question", ""),
-            reason,
-        ]
-    ).lower()
-    if any(hint in blob for hint in ARCHITECTURE_HINTS):
-        return "architecture"
-    if any(hint in blob for hint in FRAMEWORK_HINTS):
-        return "framework"
-    if _foundation_topic_rank(item) < 3:
-        return "foundation"
-    if item.get("difficulty") == "hard":
-        return "architecture"
-    if item.get("difficulty") == "easy":
-        return "foundation"
-    return "framework"
-
-
-def _parse_years(raw: str) -> float | None:
-    text = (raw or "").strip()
-    if not text or "未知" in text:
-        return None
-    matched = re.search(r"(\d+(?:\.\d+)?)", text)
-    if matched:
-        return float(matched.group(1))
-    digits = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-    for char, value in digits.items():
-        if char in text:
-            return float(value)
-    return None
-
-
-def _stage_quotas(count: int, junior: bool) -> dict[str, int]:
-    weights = (
-        {"foundation": 4, "framework": 2, "architecture": 2, "experience": 2}
-        if junior
-        else {"foundation": 2, "framework": 4, "architecture": 2, "experience": 2}
-    )
-    total = sum(weights.values())
-    quotas = {stage: (count * weight) // total for stage, weight in weights.items()}
-    leftover = count - sum(quotas.values())
-    priority = ("foundation", "framework", "architecture", "experience") if junior else (
-        "framework",
-        "foundation",
-        "architecture",
-        "experience",
-    )
-    index = 0
-    while leftover > 0:
-        quotas[priority[index % len(priority)]] += 1
-        leftover -= 1
-        index += 1
-    return quotas
-
-
-def _foundation_topic_rank(item: dict) -> int:
-    topic = str(item.get("topic") or "").lower()
-    if "css" in topic:
-        return 0
-    if "javascript" in topic or topic in {"js", "ecmascript"}:
-        return 1
-    if "html" in topic:
-        return 2
-    return 3
 
 
 def _draft_experience_questions(profile: dict, resume_text: str, count: int) -> list[dict]:
@@ -929,83 +848,16 @@ def _draft_experience_questions(profile: dict, resume_text: str, count: int) -> 
     return selected
 
 
-def _order_selected(selected: list[dict], focus: str) -> list[dict]:
-    def key(item: dict):
-        stage = item.get("stage", "foundation")
-        topic_rank = _foundation_topic_rank(item) if stage == "foundation" and focus == "frontend" else 0
-        return (STAGE_RANK.get(stage, 99), topic_rank, item.get("id", ""))
-
-    return sorted(selected, key=key)
-
-
-def _default_direction(item: dict, stage: str) -> str:
-    if stage == "foundation":
-        return "先给定义或结论，再补一个具体例子，最后点出常见误区。"
-    if stage == "framework":
-        return "先说框架机制怎么工作，再对比一种替代方案，最后落到项目里你会怎么选。"
-    if stage == "architecture":
-        return "先讲目标与约束，再给方案取舍，最后补监控、回滚或代价。"
-    return "先交代项目背景与你的职责，再说决策与结果，最后复盘一处可改进点。"
-
-
-def _balance_and_sort(selected: list[dict], quotas: dict[str, int], focus: str, junior: bool) -> list[dict]:
-    buckets: dict[str, list[dict]] = {stage: [] for stage in ("foundation", "framework", "architecture")}
-    seen: set[str] = set()
-    for item in selected:
-        stage = item.get("stage", "foundation")
-        if stage not in buckets or item["id"] in seen:
-            continue
-        seen.add(item["id"])
-        buckets[stage].append(item)
-
-    def sort_bucket(stage: str, items: list[dict]) -> list[dict]:
-        def key(item: dict):
-            difficulty = {"easy": 0, "medium": 1, "hard": 2}.get(item.get("difficulty"), 1)
-            if stage == "foundation" and focus == "frontend":
-                return (_foundation_topic_rank(item), difficulty if junior else 0, item["id"])
-            if stage == "foundation" and junior:
-                return (0, difficulty, item["id"])
-            if stage == "framework" and not junior:
-                return (0, -difficulty, item["id"])
-            return (0, difficulty, item["id"])
-
-        return sorted(items, key=key)
-
-    for stage in buckets:
-        buckets[stage] = sort_bucket(stage, buckets[stage])
-
-    picked: list[dict] = []
-    for stage in ("foundation", "framework", "architecture"):
-        need = quotas.get(stage, 0)
-        picked.extend(buckets[stage][:need])
-        buckets[stage] = buckets[stage][need:]
-
-    short = sum(quotas.get(stage, 0) for stage in ("foundation", "framework", "architecture")) - len(picked)
-    spill = ("foundation", "framework", "architecture") if junior else ("framework", "foundation", "architecture")
-    while short > 0:
-        progressed = False
-        for stage in spill:
-            if buckets[stage]:
-                picked.append(buckets[stage].pop(0))
-                short -= 1
-                progressed = True
-                if short <= 0:
-                    break
-        if not progressed:
-            break
-    return picked
-
-
 def _load_json(text: str):
     fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if fenced:
         text = fenced.group(1)
     start_candidates = [index for index in (text.find("["), text.find("{")) if index >= 0]
     if not start_candidates:
-        raise SystemExit(f"模型没有返回 JSON：{text[:300]}")
+        raise AgentError(f"模型没有返回 JSON：{text[:300]}")
     start = min(start_candidates)
     end = max(text.rfind("]"), text.rfind("}"))
     try:
         return json.loads(text[start : end + 1])
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"模型返回的 JSON 无法解析：{exc}") from exc
+        raise AgentError(f"模型返回的 JSON 无法解析：{exc}") from exc

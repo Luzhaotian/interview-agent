@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 
+from src.errors import AgentError
 def read_resume(path: Path) -> str:
     if not path.is_file():
-        raise SystemExit(f"找不到简历文件：{path}")
+        raise AgentError(f"找不到简历文件：{path}")
 
     suffix = path.suffix.lower()
     if suffix == ".pdf":
@@ -15,11 +16,11 @@ def read_resume(path: Path) -> str:
     elif suffix in {".md", ".txt", ".markdown"}:
         text = path.read_text(encoding="utf-8")
     else:
-        raise SystemExit("简历只支持 PDF、DOCX、Markdown、TXT")
+        raise AgentError("简历只支持 PDF、DOCX、Markdown、TXT")
 
     text = text.strip()
     if not text:
-        raise SystemExit(f"简历是空的：{path}")
+        raise AgentError(f"简历是空的：{path}")
     return text
 
 

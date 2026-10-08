@@ -2,15 +2,16 @@
 import { computed, nextTick, ref, watch } from 'vue'
 
 import IGButton from '@/components/IGButton.vue'
+import IGQuestionCard from '@/components/IGQuestionCard.vue'
 import { label, stageOrder } from '@/lib/labels'
 import { renderMarkdown } from '@/lib/markdown'
-import { readSse, isAbortError, type SseEvent } from '@/lib/sse'
+import { createDoneTracker, isAbortError, readSse, type SseEvent } from '@/lib/sse'
 import { createTypewriter } from '@/lib/typewriter'
+import { uid } from '@/lib/uid'
 import {
   messageText,
   transcriptMarkdown,
   type ChatMessage,
-  type InterviewDecision,
   type Profile,
   type Question,
   type ResumeReport,
@@ -34,7 +35,8 @@ const showJumpBottom = ref(false)
 const BOTTOM_GAP = 72
 let scrollingProgrammatically = false
 let jumpTimer = 0
-let activeAbort: AbortController | null = null
+/** 每个线程各自持有 AbortController：生成中切走后，停止按钮只作用于当前线程。 */
+const aborts = new Map<string, AbortController>()
 const activeMarkerId = ref('')
 const hoveredMarkerId = ref('')
 
@@ -243,8 +245,9 @@ function onDrop(event: DragEvent) {
   addFiles(event.dataTransfer?.files)
 }
 
-function latestContext() {
-  const packs = chat.messages.filter((item) => item.questions?.length)
+function latestContext(threadId: string) {
+  const threadMessages = chat.threadOf(threadId)?.messages || chat.messages
+  const packs = threadMessages.filter((item) => item.questions?.length)
   const questionCtx = packs.length
     ? packs.map((item, index) => `【第 ${index + 1} 批题目】\n${messageText(item)}`).join('\n\n')
     : ''
@@ -254,10 +257,11 @@ function latestContext() {
   return questionCtx
 }
 
-function selectedQuestionIds() {
+function selectedQuestionIds(threadId: string) {
+  const threadMessages = chat.threadOf(threadId)?.messages || chat.messages
   const ids: string[] = []
   const seen = new Set<string>()
-  for (const message of chat.messages) {
+  for (const message of threadMessages) {
     for (const item of message.questions || []) {
       if (!item.id || seen.has(item.id)) continue
       seen.add(item.id)
@@ -277,15 +281,13 @@ function profilePayload() {
   }
 }
 
-function push(message: ChatMessage) {
-  chat.messages.push(message)
-  chat.touchActive()
+function push(threadId: string, message: ChatMessage) {
+  chat.addMessage(threadId, message)
   return message
 }
 
-function patch(id: string, updater: (message: ChatMessage) => void) {
-  const target = chat.messages.find((item) => item.id === id)
-  if (target) updater(target)
+function patch(threadId: string, id: string, updater: (message: ChatMessage) => void) {
+  chat.updateMessage(threadId, id, updater)
 }
 
 const skipMemory = new Set<string>()
@@ -321,8 +323,8 @@ function usePrompt(text: string) {
 }
 
 function stopGeneration() {
-  if (!chat.sending || !activeAbort) return
-  activeAbort.abort()
+  if (!chat.sending) return
+  aborts.get(chat.activeId)?.abort()
 }
 
 function isScreenRequest(text: string) {
@@ -330,11 +332,17 @@ function isScreenRequest(text: string) {
 }
 
 function groupedQuestions(questions: Question[]) {
+  // index 是组内序号（卡片显示编号），stagger 是全局序号（错峰浮现用）：
+  // 题卡由后端一次性 emit，逐张延迟出现避免「突然一大块」
+  let globalIndex = 0
   return stageOrder
-    .map((stage) => ({
-      stage,
-      items: questions.filter((item) => item.stage === stage),
-    }))
+    .map((stage) => {
+      const stageItems = questions.filter((item) => item.stage === stage)
+      return {
+        stage,
+        items: stageItems.map((item, index) => ({ question: item, index, stagger: globalIndex++ })),
+      }
+    })
     .filter((group) => group.items.length)
 }
 
@@ -347,14 +355,16 @@ async function send() {
   const attachments = [...files.value]
   draft.value = ''
   clearFiles()
-  push({
-    id: crypto.randomUUID(),
+  // 绑定发起时的线程：生成期间用户切走后，SSE 事件仍写回这条线程，不会丢
+  const threadId = chat.activeId
+  push(threadId, {
+    id: uid(),
     role: 'user',
     text: text || `请根据这份简历出 ${count.value} 道题，按基础到经历排布`,
     fileName: attachments.map((item) => item.name).join('、') || undefined,
   })
-  const assistant = push({
-    id: crypto.randomUUID(),
+  const assistant = push(threadId, {
+    id: uid(),
     role: 'assistant',
     text: '',
     thinking: [],
@@ -362,19 +372,19 @@ async function send() {
     streaming: true,
   })
   const controller = new AbortController()
-  activeAbort = controller
-  chat.sending = true
+  aborts.set(threadId, controller)
+  chat.beginSend(threadId)
   try {
     if (attachments.length && isScreenRequest(text)) {
-      await screenStream(attachments, assistant.id, controller.signal)
+      await screenStream(threadId, attachments, assistant.id, controller.signal)
     } else if (attachments.length) {
-      await recommendStream(attachments, assistant.id, controller.signal)
+      await recommendStream(threadId, attachments, assistant.id, controller.signal)
     } else {
-      await replyStream(text, assistant.id, controller.signal)
+      await replyStream(threadId, text, assistant.id, controller.signal)
     }
   } catch (error) {
     if (isAbortError(error)) {
-      patch(assistant.id, (message) => {
+      patch(threadId, assistant.id, (message) => {
         message.streaming = false
         const hasContent =
           Boolean(message.text.trim()) ||
@@ -382,43 +392,51 @@ async function send() {
           Boolean(message.reports?.some((item) => item.text || item.questions.length || item.decision))
         if (!hasContent) message.text = '已停止生成。'
       })
-      notice.value = '已停止'
+      if (threadId === chat.activeId) notice.value = '已停止'
     } else {
-      patch(assistant.id, (message) => {
+      patch(threadId, assistant.id, (message) => {
         message.error = true
         message.text = error instanceof Error ? error.message : '生成失败'
         message.streaming = false
       })
     }
   } finally {
-    activeAbort = null
-    chat.sending = false
-    chat.touchActive()
+    // Map 里可能已被新一次生成覆盖，只删属于自己的那个
+    if (aborts.get(threadId) === controller) aborts.delete(threadId)
+    chat.endSend(threadId)
   }
 }
 
-async function screenStream(attachments: File[], messageId: string, signal: AbortSignal) {
+async function screenStream(
+  threadId: string,
+  attachments: File[],
+  messageId: string,
+  signal: AbortSignal,
+) {
   const body = new FormData()
   for (const item of attachments) body.append('files', item)
   const response = await fetch('/api/screen/stream', { method: 'POST', body, signal })
+  const tracker = createDoneTracker()
   await readSse(
     response,
     (event) => {
-      applyStreamEvent(messageId, event)
+      tracker.mark(event)
+      applyStreamEvent(threadId, messageId, event)
     },
     signal,
   )
-  patch(messageId, (message) => {
+  tracker.assert()
+  patch(threadId, messageId, (message) => {
     message.streaming = false
   })
 }
 
-function applyStreamEvent(messageId: string, event: SseEvent, reportKey = '') {
+function applyStreamEvent(threadId: string, messageId: string, event: SseEvent, reportKey = '') {
   if (event.type === 'resume' && event.name) {
     const name = event.name
     const key = reportKey || `${event.index ?? 0}-${name}`
     if ((event.total ?? 1) > 1) skipMemory.add(messageId)
-    patch(messageId, (message) => {
+    patch(threadId, messageId, (message) => {
       const report: ResumeReport = {
         key,
         name,
@@ -433,7 +451,7 @@ function applyStreamEvent(messageId: string, event: SseEvent, reportKey = '') {
   }
   if (event.type === 'error') {
     let attached = false
-    patch(messageId, (message) => {
+    patch(threadId, messageId, (message) => {
       const report = currentReport(message)
       if (!report) return
       report.error = event.detail || '处理失败'
@@ -442,7 +460,7 @@ function applyStreamEvent(messageId: string, event: SseEvent, reportKey = '') {
     if (!attached) throw new Error(event.detail || '处理失败')
     return
   }
-  patch(messageId, (message) => {
+  patch(threadId, messageId, (message) => {
     const report = currentReport(message)
     if (event.type === 'thinking' && event.text) {
       applyThinking(message, event)
@@ -469,14 +487,20 @@ function applyStreamEvent(messageId: string, event: SseEvent, reportKey = '') {
   })
 }
 
-async function recommendStream(attachments: File[], messageId: string, signal: AbortSignal) {
+async function recommendStream(
+  threadId: string,
+  attachments: File[],
+  messageId: string,
+  signal: AbortSignal,
+) {
   const body = new FormData()
   for (const item of attachments) body.append('files', item)
   body.append('count', String(count.value))
   const response = await fetch('/api/recommend/stream', { method: 'POST', body, signal })
   let activeKey = ''
+  const tracker = createDoneTracker()
   const typewriter = createTypewriter((chunk, key) => {
-    patch(messageId, (message) => {
+    patch(threadId, messageId, (message) => {
       const report = key ? message.reports?.find((item) => item.key === key) : undefined
       if (report) report.text += chunk
       else message.text += chunk
@@ -486,21 +510,23 @@ async function recommendStream(attachments: File[], messageId: string, signal: A
     await readSse(
       response,
       (event) => {
+        tracker.mark(event)
         if (event.type === 'resume' && event.name) {
           activeKey = `${event.index ?? 0}-${event.name}`
-          applyStreamEvent(messageId, event, activeKey)
+          applyStreamEvent(threadId, messageId, event, activeKey)
           return
         }
         if (event.type === 'token' && event.text) {
           typewriter.push(event.text, activeKey || undefined)
           return
         }
-        applyStreamEvent(messageId, event)
+        applyStreamEvent(threadId, messageId, event)
       },
       signal,
     )
+    tracker.assert()
     await typewriter.flush()
-    patch(messageId, (message) => {
+    patch(threadId, messageId, (message) => {
       message.streaming = false
       if (!message.reports?.length && !message.text.trim()) {
         message.text = '题目已按基础 → 框架 → 架构经验 → 过往经历排好。可继续追问某一道。'
@@ -512,8 +538,10 @@ async function recommendStream(attachments: File[], messageId: string, signal: A
   }
 }
 
-async function replyStream(text: string, messageId: string, signal: AbortSignal) {
-  const history = chat.messages
+async function replyStream(threadId: string, text: string, messageId: string, signal: AbortSignal) {
+  // 历史/上下文在发起时取当前线程快照；send() 里同步调用，threadId 即 activeId
+  const threadMessages = chat.threadOf(threadId)?.messages || chat.messages
+  const history = threadMessages
     .filter((item) => !item.error && item.id !== messageId)
     .map((item) => ({ role: item.role, content: messageText(item) }))
   if (!history.length || history[history.length - 1]?.content !== text) {
@@ -524,15 +552,16 @@ async function replyStream(text: string, messageId: string, signal: AbortSignal)
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: history,
-      context: latestContext(),
-      selected_ids: selectedQuestionIds(),
+      context: latestContext(threadId),
+      selected_ids: selectedQuestionIds(threadId),
       profile: profilePayload(),
       count: 5,
     }),
     signal,
   })
+  const tracker = createDoneTracker()
   const typewriter = createTypewriter((chunk) => {
-    patch(messageId, (message) => {
+    patch(threadId, messageId, (message) => {
       message.text += chunk
     })
   })
@@ -540,16 +569,17 @@ async function replyStream(text: string, messageId: string, signal: AbortSignal)
     await readSse(
       response,
       (event) => {
+        tracker.mark(event)
         if (event.type === 'thinking' && event.text) {
-          patch(messageId, (message) => {
+          patch(threadId, messageId, (message) => {
             applyThinking(message, event)
           })
         } else if (event.type === 'question') {
-          patch(messageId, (message) => {
+          patch(threadId, messageId, (message) => {
             message.questions = [...(message.questions || []), event.question as Question]
           })
         } else if (event.type === 'decision' && event.decision) {
-          patch(messageId, (message) => {
+          patch(threadId, messageId, (message) => {
             message.decision = event.decision
           })
         } else if (event.type === 'token' && event.text) {
@@ -560,8 +590,9 @@ async function replyStream(text: string, messageId: string, signal: AbortSignal)
       },
       signal,
     )
+    tracker.assert()
     await typewriter.flush()
-    patch(messageId, (message) => {
+    patch(threadId, messageId, (message) => {
       message.streaming = false
       if (!message.text.trim() && message.questions?.length) {
         message.text = '已补充题目，样式与首次出题一致。可继续追问某一道。'
@@ -842,59 +873,13 @@ function exportChat() {
                 <div v-if="report.questions.length" class="mt-[18px] grid gap-[18px]">
                   <section v-for="group in groupedQuestions(report.questions)" :key="group.stage">
                     <h3 class="mb-2.5 mt-0 font-display text-[22px]">{{ label(group.stage) }}</h3>
-                    <article
-                      v-for="(item, index) in group.items"
-                      :key="`${report.key}-${item.id}`"
-                      class="animate-rise mt-0 rounded-[14px] border border-line/10 bg-panel-strong p-3.5 [&+&]:mt-2.5"
-                    >
-                      <p class="m-0 flex gap-2.5 font-bold leading-[1.45]">
-                        <span
-                          class="inline-grid size-6 flex-none place-items-center rounded-full bg-accent-soft text-xs text-accent"
-                          >{{ index + 1 }}</span
-                        >
-                        {{ item.question }}
-                      </p>
-                      <p class="mb-2.5 mt-1.5 text-[13px] text-muted">
-                        {{ label(item.category) }} · {{ item.topic }} · {{ label(item.difficulty) }}
-                        <span
-                          v-if="item.source === 'web'"
-                          class="ml-2 inline-block rounded-full bg-[#e8eef8] px-2 py-px text-xs font-bold text-[#2f5f9e]"
-                          >联网</span
-                        >
-                        <span
-                          v-else-if="item.source === 'probe'"
-                          class="ml-2 inline-block rounded-full bg-[#f3e8f8] px-2 py-px text-xs font-bold text-[#6b3d8f]"
-                          >追问</span
-                        >
-                        <span
-                          v-else-if="item.source === 'resume'"
-                          class="ml-2 inline-block rounded-full bg-accent-soft px-2 py-px text-xs font-bold text-accent"
-                          >简历</span
-                        >
-                      </p>
-                      <p
-                        v-if="item.source === 'web' && item.source_url"
-                        class="-mt-1 mb-2.5 text-[13px] text-muted"
-                      >
-                        来源
-                        <a
-                          class="text-accent no-underline hover:underline"
-                          :href="item.source_url"
-                          target="_blank"
-                          rel="noreferrer"
-                          >{{ item.source_title || item.source_url }}</a
-                        >
-                      </p>
-                      <p v-if="item.reason" class="m-0 leading-[1.65] [&+p]:mt-2">
-                        <em class="pill-em">为什么问</em>{{ item.reason }}
-                      </p>
-                      <p class="m-0 leading-[1.65] [&+p]:mt-2">
-                        <em class="pill-em">回答方向</em>{{ item.answer_direction }}
-                      </p>
-                      <p class="m-0 leading-[1.65] [&+p]:mt-2">
-                        <em class="pill-em">参考答案</em>{{ item.reference_answer }}
-                      </p>
-                    </article>
+                    <IGQuestionCard
+                      v-for="item in group.items"
+                      :key="`${report.key}-${item.question.id}`"
+                      :question="item.question"
+                      :index="item.index"
+                      :stagger="item.stagger"
+                    />
                   </section>
                 </div>
               </section>
@@ -1015,59 +1000,13 @@ function exportChat() {
               <div v-if="message.questions?.length" class="mt-[18px] grid gap-[18px]">
                 <section v-for="group in groupedQuestions(message.questions)" :key="group.stage">
                   <h3 class="mb-2.5 mt-0 font-display text-[22px]">{{ label(group.stage) }}</h3>
-                  <article
-                    v-for="(item, index) in group.items"
-                    :key="item.id"
-                    class="animate-rise mt-0 rounded-[14px] border border-line/10 bg-panel-strong p-3.5 [&+&]:mt-2.5"
-                  >
-                    <p class="m-0 flex gap-2.5 font-bold leading-[1.45]">
-                      <span
-                        class="inline-grid size-6 flex-none place-items-center rounded-full bg-accent-soft text-xs text-accent"
-                        >{{ index + 1 }}</span
-                      >
-                      {{ item.question }}
-                    </p>
-                    <p class="mb-2.5 mt-1.5 text-[13px] text-muted">
-                      {{ label(item.category) }} · {{ item.topic }} · {{ label(item.difficulty) }}
-                      <span
-                        v-if="item.source === 'web'"
-                        class="ml-2 inline-block rounded-full bg-[#e8eef8] px-2 py-px text-xs font-bold text-[#2f5f9e]"
-                        >联网</span
-                      >
-                      <span
-                        v-else-if="item.source === 'probe'"
-                        class="ml-2 inline-block rounded-full bg-[#f3e8f8] px-2 py-px text-xs font-bold text-[#6b3d8f]"
-                        >追问</span
-                      >
-                      <span
-                        v-else-if="item.source === 'resume'"
-                        class="ml-2 inline-block rounded-full bg-accent-soft px-2 py-px text-xs font-bold text-accent"
-                        >简历</span
-                      >
-                    </p>
-                    <p
-                      v-if="item.source === 'web' && item.source_url"
-                      class="-mt-1 mb-2.5 text-[13px] text-muted"
-                    >
-                      来源
-                      <a
-                        class="text-accent no-underline hover:underline"
-                        :href="item.source_url"
-                        target="_blank"
-                        rel="noreferrer"
-                        >{{ item.source_title || item.source_url }}</a
-                      >
-                    </p>
-                    <p v-if="item.reason" class="m-0 leading-[1.65] [&+p]:mt-2">
-                      <em class="pill-em">为什么问</em>{{ item.reason }}
-                    </p>
-                    <p class="m-0 leading-[1.65] [&+p]:mt-2">
-                      <em class="pill-em">回答方向</em>{{ item.answer_direction }}
-                    </p>
-                    <p class="m-0 leading-[1.65] [&+p]:mt-2">
-                      <em class="pill-em">参考答案</em>{{ item.reference_answer }}
-                    </p>
-                  </article>
+                  <IGQuestionCard
+                    v-for="item in group.items"
+                    :key="item.question.id"
+                    :question="item.question"
+                    :index="item.index"
+                    :stagger="item.stagger"
+                  />
                 </section>
               </div>
             </template>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import jieba
@@ -14,9 +15,11 @@ from src.embeddings import (
     embed_corpus,
     embed_query,
     embeddings_match,
+    invalidate_caches,
     load_embeddings,
     save_embeddings,
 )
+from src.errors import AgentError
 
 jieba.setLogLevel(20)
 
@@ -81,6 +84,8 @@ def ingest() -> list[dict]:
     print(f"正在为 {len(questions)} 道题生成向量（backend={backend}）…")
     matrix = embed_corpus(texts)
     save_embeddings([item["id"] for item in questions], matrix)
+    # 新写了 npz / joblib，清掉进程内缓存，避免本进程后续读到旧向量
+    invalidate_caches()
     print(f"向量已写入 {EMBEDDINGS_PATH}，维度 {matrix.shape[1]}")
     return questions
 
@@ -97,7 +102,7 @@ def load_index() -> list[dict]:
 
 def scan_kb() -> list[dict]:
     if not KB_DIR.is_dir():
-        raise SystemExit(f"知识库目录不存在：{KB_DIR}")
+        raise AgentError(f"知识库目录不存在：{KB_DIR}")
 
     questions: list[dict] = []
     seen: set[str] = set()
@@ -107,7 +112,7 @@ def scan_kb() -> list[dict]:
         if path.suffix.lower() in {".json", ".md", ".markdown"} and path.is_file()
     )
     if not files:
-        raise SystemExit(f"{KB_DIR} 里没有 Markdown 或 JSON 题目")
+        raise AgentError(f"{KB_DIR} 里没有 Markdown 或 JSON 题目")
 
     for path in files:
         default_category = _category_from_path(path)
@@ -115,18 +120,18 @@ def scan_kb() -> list[dict]:
             try:
                 item = Question.model_validate(raw).model_dump()
             except ValidationError as exc:
-                raise SystemExit(f"{path} 题目格式不对：{exc}") from exc
+                raise AgentError(f"{path} 题目格式不对：{exc}") from exc
             if item["category"] not in CATEGORIES:
-                raise SystemExit(f"{path} 的分类必须是 frontend / agent / backend：{item['id']}")
+                raise AgentError(f"{path} 的分类必须是 frontend / agent / backend：{item['id']}")
             if item["difficulty"] not in DIFFICULTIES:
-                raise SystemExit(f"{path} 的难度必须是 easy / medium / hard：{item['id']}")
+                raise AgentError(f"{path} 的难度必须是 easy / medium / hard：{item['id']}")
             if item["id"] in seen:
-                raise SystemExit(f"题目 id 重复：{item['id']}（{path}）")
+                raise AgentError(f"题目 id 重复：{item['id']}（{path}）")
             seen.add(item["id"])
             questions.append(item)
 
     if not questions:
-        raise SystemExit("没有扫描到任何题目")
+        raise AgentError("没有扫描到任何题目")
     return questions
 
 
@@ -230,11 +235,11 @@ def _read_file(path: Path, default_category: str | None) -> list[dict]:
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise SystemExit(f"{path} 不是合法 JSON：{exc}") from exc
+            raise AgentError(f"{path} 不是合法 JSON：{exc}") from exc
         if isinstance(payload, dict):
             payload = payload.get("questions", [payload])
         if not isinstance(payload, list):
-            raise SystemExit(f"{path} 必须是题目数组")
+            raise AgentError(f"{path} 必须是题目数组")
         return [_fill_category(item, default_category) for item in payload]
     return _parse_markdown(text, default_category)
 
@@ -308,14 +313,16 @@ def _index_text(item: dict) -> str:
     )
 
 
-def _tokenize(text: str) -> list[str]:
+@lru_cache(maxsize=None)
+def _tokenize(text: str) -> tuple[str, ...]:
+    """jieba 分词。retrieve/find_skill_gaps 会对每道题反复调用，纯函数缓存掉。"""
     tokens = []
     for token in jieba.lcut(text.lower()):
         token = token.strip()
         if not token or token in STOPWORDS or not any(char.isalnum() for char in token):
             continue
         tokens.append(token)
-    return tokens or ["空"]
+    return tuple(tokens) or ("空",)
 
 
 def _skill_tokens(skills: list[str]) -> set[str]:
